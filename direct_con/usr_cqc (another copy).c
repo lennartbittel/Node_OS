@@ -173,14 +173,14 @@ repeat_send:
         return written ? written:len;
 }
 
-int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int max_size)
+int tcp_client_receive(struct socket *sock, char *str,unsigned long flags)
 {
         //mm_segment_t oldmm;
         struct msghdr msg;
         //struct iovec iov;
         struct kvec vec;
         int len;
-        //int max_size = 50;
+        int max_size = 50;
 
         msg.msg_name    = 0;
         msg.msg_namelen = 0;
@@ -286,7 +286,7 @@ int tcp_client_connect(void)
                                                               &recv_wait);
                         */
                         memset(&response, 0, len+1);
-                        tcp_client_receive(conn_socket, response, MSG_DONTWAIT,50);
+                        tcp_client_receive(conn_socket, response, MSG_DONTWAIT);
                         //break;
                 }
 
@@ -339,7 +339,6 @@ err:
 
 
 #define usr_identity   11
-#define noti_f 1
 typedef struct {
 	int task;
 	int first;
@@ -348,7 +347,6 @@ typedef struct {
 }command;
 typedef struct {
 	char name[100];
-	int app_id;
 	int state;
 	int priority;
 	command **code;
@@ -359,70 +357,29 @@ typedef struct {
 	int breaks;
 	int starting_time;
 	}Progs;
-#define max_prog 10
-#define amount_qubits 10
-//typedef enum { false, true } bool;
-typedef struct
-{
-	char name [20];
-	unsigned char ip[5];
-	unsigned int port;
-}people;
-typedef struct
-{
-	
-	Progs **Running;
-	int used_r[max_prog];
-	Progs **Sleeping;
-	int used_s[max_prog];
-	Progs **Not_started;
-	int used_n[max_prog];
-	int qubits[amount_qubits];
-	int q_live[amount_qubits];
-	int g_prio[max_prog]; 
-	Progs prog_lis[max_prog];
-}OS;
+
 cqcHeader cqcH;
 cmdHeader cmdH;
 xtraCmdHeader xtra;
 command cur;
 #define CQC_OPT_NOTIFY 		0x01
 #define CQC_OPT_BLOCK           0x04
-
-int OS_next_p(OS *self);
-int OS_sleep_p(OS *self,int prog_num);
-
-int perform_cmd(OS *self)
-{	
-	Progs *prog;
-	int index=OS_next_p(self);
-	if(index==-1)
-		return -1;
-	prog=self->Running[index];
+int perform_cmd(Progs *prog)
+{
 	printk(KERN_INFO "perform cmd. Hope this will not break...\n");
 	cur=*(prog->code[prog->cur]);
 	printk(KERN_INFO "Taks started:%d, %d\n",prog->cur,cur.task);
 	//cqc_task
-	if(cur.task==cmd_if) //if statement
-		{
-			if(prog->codevar[cur.first])
-				(prog->cur)+=2; // If true the second line is executed
-			return 0;
-			
-		}
-	else if (cur.task==cmd_done)
-		{
-			printk(KERN_INFO "Task %s is finished, the results are: %d,%d",prog->name, prog_codevar,prog_codevar);
-		}
+	
 	cqcH.version = 0;
-	cqcH.app_id = prog->app_id;
+	cqcH.app_id = usr_identity;
 	cqcH.type = 1; //command
 	
-	++(prog->priority);
+	
 	
 	cmdH.qubit_id=cur.first;
 	cmdH.instr=cur.task;
-	cmdH.options=noti_f*CQC_OPT_NOTIFY+CQC_OPT_BLOCK;// determines notify, block, action Add as additional!!
+	cmdH.options=CQC_OPT_NOTIFY+CQC_OPT_BLOCK;// determines notify, block, action Add as additional!!
 	
 
 	
@@ -492,16 +449,18 @@ int perform_cmd(OS *self)
 			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
 			tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
 		}
-	++(prog->cur);
-	if(noti_f)
-		{
-			OS_sleep_p(self,index);
-		}
-	else
-		{
-		}
-
 	
+	else if(cur.task==cmd_if) //if statement
+		{
+			if(prog->codevar[cur.first])
+				++(prog->cur); // If true the second line is executed
+			
+		}
+	else if (cur.task==cmd_done)
+		{
+			
+		}
+	++(prog->cur);
 	return 0;	 
 }
 
@@ -517,7 +476,29 @@ int perform_cmd(OS *self)
 
 
 
-
+#define max_prog 100
+#define amount_qubits 10
+//typedef enum { false, true } bool;
+typedef struct
+{
+	char name [20];
+	unsigned char ip[5];
+	unsigned int port;
+}people;
+typedef struct
+{
+	
+	Progs **Running;
+	int used_r[max_prog];
+	Progs **Sleeping;
+	int used_s[max_prog];
+	Progs **Not_started;
+	int used_n[max_prog];
+	int qubits[amount_qubits];
+	int q_live[amount_qubits];
+	int g_prio[max_prog]; 
+	Progs prog_lis[max_prog];
+}OS;
 int OS_init(OS *self){
 	int i;
 	self->Running=kmalloc(max_prog * sizeof(struct Progs *),GFP_KERNEL);
@@ -564,8 +545,6 @@ int OS_next_p(OS *self)
 				i=k;
 		}
 	}
-	if(i==0 && self->used_r[i]==0)
-		return -1;
 	return i;
 }
 int OS_insert_p(OS *self,Progs *prog)
@@ -615,43 +594,14 @@ int OS_sleep_p(OS *self,int prog_num)
 	}
 	return -1;
 }
-int OS_find_appid(OS *self,int app_id)
-{
-	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	int i=0;
-	for(i=0; i< max_prog;++i)
-	{
-		if(!self->used_s[i])
-		{
-			if (self->Sleeping[i]->app_id==app_id)
-				return i;
-		}
-	}
-	return -1;
-}
-int OS_wakeup_p(OS *self,int prog_num)
-{
-	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	int i=0;
-	for(i=0; i< max_prog;++i)
-	{
-		if(!self->used_r[i])
-		{
-			self->Running[i]=self->Sleeping[prog_num];
-			self->used_r[prog_num]=1;
-			self->Sleeping[prog_num]=NULL;
-			self->used_s[prog_num]=0;
-			return i;
-		}
-	}
-	return -1;
-}
 int OS_run_p(OS *self)
 {
-	int res=perform_cmd(self);
-	
+	int i=OS_next_p(self);
+	Progs *prog=self->Running[i];
+	int res=perform_cmd(prog);
 	if(res<0)
 		printk(KERN_INFO "Running Task has failed");
+	++(self->g_prio[i]);
 	return -1;
 	
 }
@@ -727,74 +677,6 @@ int file_sync(struct file *file)
     vfs_fsync(file, 0);
     return 0;
 }
-cqcHeader cqcH_ret;
-notifyHeader cqcN_ret;
-#define CQC_TP_HELLO            0       /* Alive check */
-#define CQC_TP_COMMAND          1       /* Execute a command list */
-#define CQC_TP_FACTORY          2       /* Start executing command list repeatedly */
-#define CQC_TP_EXPIRE           3       /* Qubit has expired */
-#define CQC_TP_DONE             4       /* Command execution done */
-#define CQC_TP_RECV             5       /* Recevied qubit */
-#define CQC_TP_EPR_OK           6       /* Created EPR pair */
-#define CQC_TP_MEASOUT          7       /* Measurement outcome */
-#define CQC_TP_GET_TIME         8       /* Get creation time of qubit */
-#define CQC_TP_INF_TIME         9       /* Inform about time */
-
-#define CQC_ERR_GENERAL         20      /* General purpose error (no details */
-#define CQC_ERR_NOQUBIT         21      /* No more qubits available */
-#define CQC_ERR_UNSUPP          22      /* Command sequence not supported */
-#define CQC_ERR_TIMEOUT         23      /* Timeout */
-#define CQC_ERR_INUSE           24      /* Qubit ID in use when requesting new ID */
-
-int cqc_response(OS *self)
-{
-	int res;	
-	res =tcp_client_receive(conn_socket, cqcH_ret.str,MSG_DONTWAIT,sizeof(cqcH_ret.str));
-	if(res<0)
-		{
-		printk(KERN_INFO "No message recv\n");
-		return -1;
-		}
-	printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d\n",res,cqcH_ret.version,cqcH_ret.type,cqcH_ret.app_id,cqcH_ret.length);
-	if(cqcH_ret.length>0)
-	{
-		mdelay(1000);
-		res =tcp_client_receive(conn_socket, cqcN_ret.str,MSG_DONTWAIT,sizeof(cqcN_ret.str));
-		printk(KERN_INFO "Notify res: %d, data: id:%d,outcome:%d,datetime:%d, remodteappid: %d \n",res,cqcN_ret.qubit_id,cqcN_ret.outcome,(int)(cqcN_ret.datetime),(int)(cqcN_ret.remote_app_id));
-	}
-
-	
-
-	if(cqcH_ret.type==CQC_TP_HELLO) //just a simple ping 
-		{
-		return 0;
-		}
-	res=OS_find_appid(self,cqcH_ret.app_id);
-	if(res==-1)
-		{
-		printk(KERN_INFO "Recv MS for unknown app_id:%d",(int)(cqcH_ret.app_id));
-		return -2;
-		}
-	
-	if (cqcH_ret.type==CQC_TP_DONE)
-		{
-
-			OS_wakeup_p(self,res);
-		}
-	else if (cqcH_ret.type==CQC_TP_MEASOUT)
-		{
-			self->Sleeping[res]->codevar[self->Sleeping[res]->code[self->Sleeping[res]->cur -1]->second]=cqcN_ret.outcome;
-			if(!noti_f)
-				OS_wakeup_p(self,res);
-			
-		}
-	else if (cqcH_ret.type==CQC_ERR_INUSE)
-		{
-			printk(KERN_INFO "Requested qubit already in use. app_id: %d",(int)(cqcH_ret.app_id));
-		}	
-	
-	return 0;
-}
 
 
 command my_c0;
@@ -821,7 +703,19 @@ static int __init ebbchar_init(void){
 
    // Register the device class
    ebbcharClass = class_create(THIS_MODULE, CLASS_NAME);
-   if (IS_ERR(ebbcharClass)){                // Check for erro
+   if (IS_ERR(ebbcharClass)){                // Check for error and clean up if there is
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to register device class\n");
+      return PTR_ERR(ebbcharClass);          // Correct way to return an error on a pointer
+   }
+   printk(KERN_INFO "EBBChar: device class registered correctly\n");
+
+   // Register the device driver
+   ebbcharDevice = device_create(ebbcharClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+   if (IS_ERR(ebbcharDevice)){               // Clean up if there is an error
+      class_destroy(ebbcharClass);           // Repeated code but the alternative is goto statements
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to create the device\n");
       return PTR_ERR(ebbcharDevice);
    }
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
@@ -831,10 +725,10 @@ static int __init ebbchar_init(void){
    printk(KERN_INFO "start tests\n");
    p.cur=0;
    p.code=kmalloc(sizeof(command *)*10,GFP_KERNEL);
-   my_c0.task=-1; my_c0.first=5;p.code[0]=&my_c0;
-   my_c1.task=cmd_new_qubit; my_c1.first=5;p.code[1]=&my_c1;
-   my_c2.task=cmd_xrot; my_c2.first=5; my_c2.second=10;p.code[2]=&my_c2;
-   my_c3.task=cmd_meas; my_c3.first=5;p.code[3]=&my_c3;
+   my_c0.task=-1; my_c0.first=0;p.code[0]=&my_c0;
+   my_c1.task=cmd_new_qubit; my_c1.first=0;p.code[1]=&my_c1;
+   my_c2.task=cmd_xrot; my_c2.first=0; my_c2.second=10;p.code[2]=&my_c2;
+   my_c3.task=cmd_meas; my_c3.first=0;p.code[3]=&my_c3;
    printk(KERN_INFO "Prog is initialized,%d\n",(int)(sizeof(command *)));
    OS_init(&my_os);
    printk(KERN_INFO "OS_init");
@@ -842,16 +736,27 @@ static int __init ebbchar_init(void){
    printk(KERN_INFO "Added prog");
    OS_start_p(&my_os,prog_id);
    printk(KERN_INFO "Prog ready, This will start the code");
-
-
-
-	for(prog_id=0;prog_id<3;++prog_id)
-	{
    	OS_run_p(&my_os);
-	mdelay(3000);   
-	cqc_response(&my_os);
-	}
+   printk(KERN_INFO "Try to recv:");
+   mdelay(1000);
+   prog_id=tcp_client_receive(conn_socket, cqc_back_cmd.str,MSG_DONTWAIT);
+   printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d ",prog_id,cqc_back_cmd.version,cqc_back_cmd.type,cqc_back_cmd.app_id,cqc_back_cmd.length);
 
+
+   	OS_run_p(&my_os);mdelay(1000);
+   mdelay(1000);
+   prog_id=tcp_client_receive(conn_socket, cqc_back_cmd.str,MSG_DONTWAIT);
+   printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d",prog_id,cqc_back_cmd.version,cqc_back_cmd.type,cqc_back_cmd.app_id,cqc_back_cmd.length);
+
+
+   	OS_run_p(&my_os);mdelay(1000);
+   prog_id=tcp_client_receive(conn_socket, cqc_back_cmd.str,MSG_DONTWAIT);
+   printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d",prog_id,cqc_back_cmd.version,cqc_back_cmd.type,cqc_back_cmd.app_id,cqc_back_cmd.length);
+
+
+   	OS_run_p(&my_os);mdelay(3000);
+   prog_id=tcp_client_receive(conn_socket, cqc_back_cmd.str,MSG_DONTWAIT);
+   printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d\n",prog_id,cqc_back_cmd.version,cqc_back_cmd.type,cqc_back_cmd.app_id,cqc_back_cmd.length);
    return 0;
 }
 
@@ -904,14 +809,12 @@ static void __exit ebbchar_exit(void){
         {
                 sock_release(conn_socket);
         }
-	printk(KERN_INFO "socket released");
 	kfree(response);
 	kfree(reply);
 	kfree(p.code);
-	printk(KERN_INFO "half is released");
-	/*kfree(my_os.Running);
+	kfree(my_os.Running);
 	kfree(my_os.Sleeping);
-	kfree(my_os.Not_started);*/
+	kfree(my_os.Not_started);
 	printk(KERN_INFO "CL: Connection stopped\n");
 }
 
