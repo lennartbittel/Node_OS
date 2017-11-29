@@ -1,13 +1,3 @@
-/**
- * @file   testebbchar.c
- * @author Derek Molloy
- * @date   7 April 2015
- * @version 0.1
- * @brief  A Linux user space program that communicates with the ebbchar.c LKM. It passes a
- * string to the LKM and reads the response from the LKM. For this example to work the device
- * must be called /dev/ebbchar.
- * @see http://www.derekmolloy.ie/ for a full description and follow-up descriptions.
-*/
 #include<stdio.h>
 #include<stdlib.h>
 #include<errno.h>
@@ -30,12 +20,49 @@ union Get_prog{
 		int size;
 		command cmds[100];
 		}__attribute__((__packed__));
+	char str[1708];
 	};
+
+union Get_prog *read_in(char *file_name,int prio)
+{
+	union Get_prog *prog=malloc(sizeof(union Get_prog));
+	FILE *file;
+	file = fopen(file_name, "r");
+	char c[100];
+	char * cur;
+	if (file) 
+		{
+		int i=0;
+		printf("file opend\n");
+		strcpy(prog->name,file_name);
+		prog->prio=prio;	
+		while(fgets(c,100,file)!=NULL)
+			{
+			  
+			  if(c[0]=='%') continue;
+			  printf("round: %d  ",i);
+ 			  ++i;				
+			  cur = strtok (c," ");
+			  prog->cmds[i-1].task=atoi(cur);
+		 	  printf("task: %d\n",prog->cmds[i-1].task);
+			  cur = strtok (NULL, " ,.-");if(cur==0) continue;
+			  
+			  prog->cmds[i-1].first=atoi(cur);cur = strtok (NULL, " ,.-");if(cur==0) continue;
+			  prog->cmds[i-1].second=atoi(cur);cur = strtok (NULL, " ,.-");if(cur==0) continue;
+			  prog->cmds[i-1].third=atoi(cur);cur = strtok (NULL, " ,.-");if(cur==0) continue;
+			  
+			}
+		prog->size=i;
+		fclose(file);
+		}
+	printf("done reading in\n");
+	return prog;
+}
 
 int main(){
    struct timeval time;
-   
-   
+   union Get_prog *prog=read_in("progs/prog2",10);
+   printf("%d,%d",prog->prio,prog->str[100]);
    printf("size: %zu\n",sizeof(union Get_prog));
    int ret, fd;
    char stringToSend[BUFFER_LENGTH];
@@ -45,12 +72,12 @@ int main(){
       perror("Failed to open the device...");
       return errno;
    }
-   printf("Type in a short string to send to the kernel module:\n");
+   /*printf("Type in a short string to send to the kernel module:\n");
    scanf("%[^\n]%*c", stringToSend);                // Read in a string (with spaces)
-   printf("Writing message to the device [%s].\n", stringToSend);
+   printf("Writing message to the device [%s].\n", stringToSend);*/
    gettimeofday( &time, 0 );
    long start_t = 1000000 * time.tv_sec + time.tv_usec;
-   ret = write(fd, stringToSend, strlen(stringToSend)); // Send the string to the LKM
+   ret = write(fd, prog->str, sizeof(prog->str)); // Send the string to the LKM
    if (ret < 0){
       perror("Failed to write the message to the device.");
       return errno;
