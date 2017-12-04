@@ -242,7 +242,7 @@ int tcp_client_connect(void)
         }
 
         memset(&reply, 0, len+1);
-        strcat(reply, "dick"); 
+        strcat(reply, "hello"); 
 	/*
 	cqcHeader cqcH;
 
@@ -377,13 +377,25 @@ int listen_for_new_people(void)
 */
 //communication between people
 
+
 typedef struct
 {
-	char name [20];
-	unsigned char ip[5];
+	char name_str [20];
+	u_int32_t ip;
 	unsigned int port;
+	uint32_t name;
+	uint32_t id;
 	struct socket *sock;
 }people;
+people **net_people;
+
+
+
+
+
+
+
+
 
 struct socket *connect_person(u32 adress,int port)
 {
@@ -434,7 +446,42 @@ typedef union
 
 #define com_start_prot		10
 #define com_send_int		11
-
+int person_send(people *contact,int cmd, int prot_id,char *ad_mes)
+{
+	comHeader comH;
+	comH.version=0;
+	comH.my_name=PORT;
+	comH.my_id=PORT;
+	comH.other_name=contact->name;
+	comH.other_id=contact->id;
+	comH.type=cmd;
+	comH.identifier=prot_id;
+	if(cmd==com_message)
+		comH.extra_length=sizeof(ad_mes);
+	else
+		comH.extra_length=0;
+	
+	tcp_client_send(contact->sock, comH.str,COM_LENGTH, MSG_DONTWAIT);
+	if(sizeof(ad_mes)>0)
+		{
+		tcp_client_send(contact->sock, ad_mes,sizeof(ad_mes), MSG_DONTWAIT);
+		}
+	printk("message was sent\n");
+	return 0;
+}
+int person_recv(people *contact)
+{
+	int reply_int;
+	comHeader comH;
+	reply_int =tcp_client_receive(conn_socket, comH.str,MSG_DONTWAIT,COM_LENGTH);
+	if(reply_int<0)
+		{
+		//printk(KERN_INFO "No message recv\n");
+		return -1;
+		}
+	printk("Message recieved from: %d,with type:%d\n",comH.my_id,comH.type);
+	return 0;
+}
 
 //end communication between people
 
@@ -1281,6 +1328,37 @@ out:
        //return 0;
        do_exit(0);
 }
+int add_person(uint32_t addr,int port ,struct socket *socket)
+{
+	
+	int id = 0;
+	int used=0;
+	printk("adding new person\n");
+               for(id = 0; id < MAX_CONNS; id++)
+               {
+			
+                        if(net_people[id] != NULL)
+				{
+				printk("connection %d exists: %d,%d\n",id,net_people[id]->ip,addr);
+                                if(net_people[id]->ip==addr)
+					used=1;
+				}
+               }
+		if(!used)
+			for(id = 0; id < MAX_CONNS; id++)
+               		{
+                        	if(net_people[id] == NULL)
+					{
+					net_people[id]=kmalloc(sizeof(people),GFP_KERNEL);
+					net_people[id]->ip=addr;
+					net_people[id]->port=ntohs(port);
+					net_people[id]->sock=socket;
+					printk("new person created %d,ip:%d\n",id,addr);
+					return 0;
+					}
+               		}
+	return 0;
+}
 
 int tcp_server_accept(void)
 {
@@ -1288,7 +1366,7 @@ int tcp_server_accept(void)
         struct socket *socket;
         struct socket *accept_socket = NULL;
         struct inet_connection_sock *isock; 
-        int id = 0;
+	int id;
         /*
         int len = 49;
         unsigned char in_buf[len+1];
@@ -1347,7 +1425,7 @@ int tcp_server_accept(void)
                char *tmp;
                int addr_len;
                */
-                
+               printk("just before accepting\n");
                add_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
                while(reqsk_queue_empty(&isock->icsk_accept_queue))
                {
@@ -1456,6 +1534,17 @@ int tcp_server_accept(void)
                                        MSG_DONTWAIT);
                }
                */
+
+
+
+		//my connecting structure
+		
+
+		add_person(client->sin_addr.s_addr,client->sin_port,socket);
+		//end of my connecting structure		
+
+
+
 
                /*should I protect this against concurrent access?*/
                for(id = 0; id < MAX_CONNS; id++)
@@ -1755,15 +1844,16 @@ void network_server_exit(void)
 
 
 comHeader com;
-int add_person(struct socket *sock)
+/*int add_person(struct socket *sock)
 {
+	
 	com.version=0;
 	com.my_name=PORT%10;
 	com.my_id=PORT;
 	com.other_name=0;
 	tcp_client_send(sock,com.str, sizeof(com.str), MSG_DONTWAIT);
 	return 0;
-}
+}*/
 command my_c0;
 command my_c1;
 command my_c2;
@@ -1774,19 +1864,20 @@ int prog_id;
 //char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
 #define waiting 1
-
+char test_str[]="lol";
 int looping(void)
 {	
 	struct socket *test_con;
 	u8 ip[]={192,168,1,2,'\0'};
 	int lauf;
-	int id;
+	//int id;
 	int run;
 	network_server_init();
 	printk("network_server established\n");
 	test_con= connect_person(create_address(ip),DEFAULT_PORT);
 	if(test_con!=NULL)
-   		add_person(test_con);
+		printk("found person under ip adress\n");
+		add_person(create_address(ip),DEFAULT_PORT,test_con);
 	run=0;
 	for(lauf=0;lauf<20*20*10+(1-waiting)*10000000;++lauf)
 	{
@@ -1813,12 +1904,12 @@ int looping(void)
 			run=0;
 			}
 		//msleep(100);
-		for(id = 0; id < MAX_CONNS; id++)
-               		{
-                        if(tcp_conn_handler->thread[id] != NULL)
-                                add_person(tcp_conn_handler->data[id]->accept_socket);
-               		}
-
+		if(lauf %(40 +(1-waiting)*100000) == 0) 
+			{
+			printk("try to send\n");
+			if (net_people[0]!=NULL)
+				person_send(net_people[0],1, 1,test_str);
+			}
 		cqc_response(&my_os);
 	}
 	return 1;
@@ -1826,7 +1917,7 @@ int looping(void)
 struct task_struct *main_thread;
 
 static int __init ebbchar_init(void){
-   
+   int i;
    cqcHeader cqcH;
    cqcH.version=2;
    printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM %d \n",cqcH.version);
@@ -1857,7 +1948,10 @@ static int __init ebbchar_init(void){
    tcp_client_connect();
    OS_init(&my_os);
    
-   
+   net_people=kmalloc(MAX_CONNS*sizeof(people *),GFP_KERNEL);
+   for(i=0; i<MAX_CONNS;++i)
+	net_people[i]=NULL;
+   printk("connection established");
 
    main_thread=kthread_run((void *)looping, NULL,DEVICE_NAME);
    
