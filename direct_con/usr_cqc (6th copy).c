@@ -1116,8 +1116,7 @@ repeat_send:
         
         if((len == -ERESTARTSYS) || (!(flags & MSG_DONTWAIT) &&\
                                 (len == -EAGAIN)))
-		return -1;
-                //goto repeat_send;
+                goto repeat_send;
 
         if(len > 0)
         {
@@ -1126,7 +1125,7 @@ repeat_send:
                 if(left)
                         goto repeat_send;
         }
-        printk("stuff was sent");
+        
         set_fs(oldmm);
         return written?written:len;
 }
@@ -1176,11 +1175,7 @@ read_again:
         len = kernel_recvmsg(sock, &msg, &vec, size, size, flags);
 
         if(len == -EAGAIN || len == -ERESTARTSYS)
-		{
-		printk("Did not work via server\n");
-		return -1;
-		}
-                //goto read_again;
+                goto read_again;
         
         tmp = inet_ntoa(&(address->sin_addr));
 
@@ -1364,7 +1359,7 @@ int add_person(uint32_t addr,int port ,struct socket *socket)
                		}
 	return 0;
 }
-struct sockaddr_in *test_rm;
+
 int tcp_server_accept(void)
 {
         int accept_err = 0;
@@ -1544,7 +1539,7 @@ int tcp_server_accept(void)
 
 		//my connecting structure
 		
-		test_rm = client;
+
 		add_person(client->sin_addr.s_addr,client->sin_port,socket);
 		//end of my connecting structure		
 
@@ -1870,7 +1865,6 @@ int prog_id;
 cqcHeader cqc_back_cmd;
 #define waiting 1
 char test_str[]="lol";
-char test_strr[500];
 int test_i,test_res;
 int looping(void)
 {	
@@ -1923,10 +1917,6 @@ int looping(void)
 					printk("IDsend: %d, res: %d\n",test_i,test_res);
 					test_res=person_recv(net_people[test_i]);
 					printk("IDrecv: %d, res: %d\n",test_i,test_res);
-					test_res=tcp_server_receive(net_people[test_i]->sock,0,test_rm,  test_strr,500, MSG_DONTWAIT);
-					printk("IDrecv_ser: %d, res: %d\n",test_i,test_res);
-					test_res= tcp_server_send(net_people[test_i]->sock, 0, test_strr,500, MSG_DONTWAIT);
-					printk("IDrsend_ser: %d, res: %d\n",test_i,test_res);
 					}
 				}
 			}
