@@ -476,7 +476,7 @@ int person_recv(people *contact)
 	reply_int =tcp_client_receive(conn_socket, comH.str,MSG_DONTWAIT,COM_LENGTH);
 	if(reply_int<0)
 		{
-		//printk(KERN_INFO "No message recv\n");
+		printk(KERN_INFO "No message recv %d\n",reply_int);
 		return -1;
 		}
 	printk("Message recieved from: %d,with type:%d\n",comH.my_id,comH.type);
@@ -1865,6 +1865,7 @@ int prog_id;
 cqcHeader cqc_back_cmd;
 #define waiting 1
 char test_str[]="lol";
+int test_i,test_res;
 int looping(void)
 {	
 	struct socket *test_con;
@@ -1907,8 +1908,17 @@ int looping(void)
 		if(lauf %(40 +(1-waiting)*100000) == 0) 
 			{
 			printk("try to send\n");
-			if (net_people[0]!=NULL)
-				person_send(net_people[0],1, 1,test_str);
+			for(test_i=0; test_i<MAX_CONNS; ++test_i)
+				{
+				if (net_people[test_i]!=NULL)
+					{
+					printk("try id %d\n",test_i);
+					test_res=person_send(net_people[test_i],1, 1,test_str);
+					printk("IDsend: %d, res: %d\n",test_i,test_res);
+					test_res=person_recv(net_people[test_i]);
+					printk("IDrecv: %d, res: %d\n",test_i,test_res);
+					}
+				}
 			}
 		cqc_response(&my_os);
 	}
@@ -1944,7 +1954,7 @@ static int __init ebbchar_init(void){
    }
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
 	//network stuff
-   printk(KERN_INFO "CL:establish TCP connection");
+   printk(KERN_INFO "CL:establish TCP connection\n");
    tcp_client_connect();
    OS_init(&my_os);
    
