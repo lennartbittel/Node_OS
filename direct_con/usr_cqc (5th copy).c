@@ -207,7 +207,7 @@ int tcp_client_connect(void)
         struct sockaddr_in daddr;
         struct socket *data_socket = NULL;
         */
-        unsigned char destip[5] = {192,168,1,1 ,'\0'};
+        unsigned char destip[5] = {131,180,82,194 ,'\0'};
         /*
         char *response = kmalloc(4096, GFP_KERNEL);
         char *reply = kmalloc(4096, GFP_KERNEL);
@@ -410,7 +410,7 @@ struct socket *connect_person(u32 adress,int port)
 		}
 	return person_socket;
 }
-#define	COM_LENGTH      26
+#define	COM_LENGTH      8
 typedef union
 {
 	struct
@@ -424,7 +424,7 @@ typedef union
 		uint64_t identifier;
 		uint32_t extra_length;
 	} __attribute__((__packed__));
-	char str[COM_LENGTH];		/* Additional details for this command */
+	char str[CQC_HDR_LENGTH];		/* Additional details for this command */
 } __attribute__((__packed__)) comHeader;
 #define com_identity		0
 #define com_hello 		1
@@ -434,7 +434,6 @@ typedef union
 
 #define com_start_prot		10
 #define com_send_int		11
-
 
 //end communication between people
 
@@ -471,7 +470,7 @@ typedef union
 
 
 #define usr_identity   11
-#define noti_f 1
+#define noti_f 0
 typedef struct {
 	int task;
 	int first;
@@ -1480,8 +1479,8 @@ int tcp_server_accept(void)
 
                tcp_conn_handler->tcp_conn_handler_stopped[id] = 0;
                tcp_conn_handler->data[id] = data;
-               //tcp_conn_handler->thread[id] = 
-               //kthread_run((void *)connection_handler, (void *)data, MODULE_NAME);
+               tcp_conn_handler->thread[id] = 
+               kthread_run((void *)connection_handler, (void *)data, MODULE_NAME);
 
                if(kthread_should_stop())
                {
@@ -1754,16 +1753,9 @@ void network_server_exit(void)
 
 
 
-comHeader com;
-int add_person(struct socket *sock)
-{
-	com.version=0;
-	com.my_name=PORT%10;
-	com.my_id=PORT;
-	com.other_name=0;
-	tcp_client_send(sock,com.str, sizeof(com.str), MSG_DONTWAIT);
-	return 0;
-}
+
+
+
 command my_c0;
 command my_c1;
 command my_c2;
@@ -1774,19 +1766,10 @@ int prog_id;
 //char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
 #define waiting 1
-
 int looping(void)
-{	
-	struct socket *test_con;
-	u8 ip[]={192,168,1,2,'\0'};
+{
 	int lauf;
-	int id;
 	int run;
-	network_server_init();
-	printk("network_server established\n");
-	test_con= connect_person(create_address(ip),DEFAULT_PORT);
-	if(test_con!=NULL)
-   		add_person(test_con);
 	run=0;
 	for(lauf=0;lauf<20*20*10+(1-waiting)*10000000;++lauf)
 	{
@@ -1813,18 +1796,13 @@ int looping(void)
 			run=0;
 			}
 		//msleep(100);
-		for(id = 0; id < MAX_CONNS; id++)
-               		{
-                        if(tcp_conn_handler->thread[id] != NULL)
-                                add_person(tcp_conn_handler->data[id]->accept_socket);
-               		}
-
 		cqc_response(&my_os);
 	}
 	return 1;
 }
 struct task_struct *main_thread;
-
+struct socket *test_con;
+u8 ip[]={192,168,1,1,'\0'};
 static int __init ebbchar_init(void){
    
    cqcHeader cqcH;
@@ -1856,8 +1834,10 @@ static int __init ebbchar_init(void){
    printk(KERN_INFO "CL:establish TCP connection");
    tcp_client_connect();
    OS_init(&my_os);
+   network_server_init();
+
    
-   
+   test_con= connect_person(create_address(ip),DEFAULT_PORT);
 
    main_thread=kthread_run((void *)looping, NULL,DEVICE_NAME);
    

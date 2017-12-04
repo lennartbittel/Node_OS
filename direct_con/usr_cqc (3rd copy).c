@@ -160,6 +160,7 @@ repeat_send:
         vec.iov_len = left;
         vec.iov_base = (char *)buf + written;
 
+        //len = sock_sendmsg(sock, &msg, left);
         len = kernel_sendmsg(sock, &msg, &vec, left, left);
         if((len == -ERESTARTSYS) || (!(flags & MSG_DONTWAIT) &&\
                                 (len == -EAGAIN)))
@@ -177,9 +178,13 @@ repeat_send:
 
 int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int max_size)
 {
+        //mm_segment_t oldmm;
         struct msghdr msg;
+        //struct iovec iov;
         struct kvec vec;
         int len;
+        //int max_size = 50;
+
         msg.msg_name    = 0;
         msg.msg_namelen = 0;
 
@@ -189,14 +194,24 @@ int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int ma
 
         vec.iov_len = max_size;
         vec.iov_base = str;
+
+        //oldmm = get_fs(); set_fs(KERNEL_DS);
+//read_again:
         len = kernel_recvmsg(sock, &msg, &vec, max_size, max_size, flags);
 
         if(len == -EAGAIN || len == -ERESTARTSYS)
         {
                 //pr_info(" *** mtp | error while reading: %d | tcp_client_receive *** \n", len);
 
+                //goto read_again;
         }
 
+
+        //pr_info(" *** mtp | the server says: %s ,size: %d| tcp_client_receive *** \n", str,(int)(sizeof(str)));
+        //set_fs(oldmm);
+	
+	//ping back again
+	//pr_info("CL: send back res:%d,%s",tcp_client_send(sock, str, strlen(str), MSG_DONTWAIT),str);
         return len;
 }
 
@@ -207,7 +222,7 @@ int tcp_client_connect(void)
         struct sockaddr_in daddr;
         struct socket *data_socket = NULL;
         */
-        unsigned char destip[5] = {192,168,1,1 ,'\0'};
+        unsigned char destip[5] = {131,180,82,194 ,'\0'};
         /*
         char *response = kmalloc(4096, GFP_KERNEL);
         char *reply = kmalloc(4096, GFP_KERNEL);
@@ -285,158 +300,14 @@ err:
         return -1;
 }
 
-#define DEFAULT_PORT 8850
-#define MAX_CONNS 16
-/*
-int listen_for_new_people(void)
-{
-	int server_err;
-	struct socket *listen_socket;
-        struct sockaddr_in server;
-	allow_signal(SIGKILL|SIGTERM);
-        DECLARE_WAIT_QUEUE_HEAD(wq);
-	server_err = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP,  &listen_socket);
-	if(server_err<0)
-		{
-		printk(KERN_INFO "Could not create listening socket");
-		return -1;
-		}
-	listen_socket->sk->sk_reuse = 1;
-	//server.sin_addr.s_addr = htonl(INADDR_ANY);
-	server.sin_addr.s_addr = INADDR_ANY;
-        server.sin_family = AF_INET;
-        server.sin_port = htons(DEFAULT_PORT);
-	server_err=listen_socket->ops->bind(listen_socket, (struct sockaddr*)&server,sizeof(server));
-	if(server_err<0)
-		{
-		printk(KERN_INFO "Could not bind listening socket");
-		return -1;
-		}
-	server_err = listen_socket->ops->listen(listen_socket, 16);
-		if(server_err<0)
-		{
-		printk(KERN_INFO "Could not listen to listening socket");
-		return -1;
-		}
-	//end of listen, start of accept
-	int accept_err = 0;
-	struct socket *accept_socket = NULL;
-	struct inet_connection_sock *isock; 
-	int id = 0;
-	DECLARE_WAITQUEUE(accept_wait, current);
-	while(1)
-		{
-		struct tcp_conn_handler_data *data = NULL;
-                struct sockaddr_in *client = NULL;
-		char *tmp;
-                int addr_len;
-		accept_err = sock_create(listen_socket->sk->sk_family, listen_socket->type,listen_socket->sk->sk_protocol, &accept_socket);
-		if(accept_err < 0 || !accept_socket)
-			{
-				printk(KERN_INFO "accepting socket not created");
-				return -1;
-			}
-		accept_socket->listen_type = listen_socket->type;
-                accept_socket->listen_ops  = listen_socket->ops;
-		isock = inet_csk(listen_socket->sk);
-		add_wait_queue(&listen_socket->sk->sk_wq->wait, &accept_wait);
-		while(reqsk_queue_empty(&isock->icsk_accept_queue))
-			{
-			__set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(HZ);
-			if(kthread_should_stop())
-		               	{
-		                printk(KERN_INFO "Stopping to listen for new people");
-		                __set_current_state(TASK_RUNNING);
-		                remove_wait_queue(&listen_socket->sk->sk_wq->wait,&accept_wait);
-		                sock_release(accept_socket);
-				sock_release(listen_socket);//from listen
-		                return 0;
-		               }
-			}
-		__set_current_state(TASK_RUNNING);
-		remove_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
-		accept_err = listen_socket->ops->accept(listen_socket, accept_socket, O_NONBLOCK);
-		if(accept_err < 0 )
-			{
-				printk(KERN_INFO "Could not accept the request");
-				return -1;
-			}
-		client = kmalloc(sizeof(struct sockaddr_in), GFP_KERNEL);   
-                memset(client, 0, sizeof(struct sockaddr_in));
 
-                addr_len = sizeof(struct sockaddr_in);
+/** @brief The LKM initialization function
+ *  The static keyword restricts the visibility of the function to within this C file. The __init
+ *  macro means that for a built-in driver (not a LKM) the function is only used at initialization
+ *  time and that it can be discarded and its memory freed up after that point.
+ *  @return returns 0 if successful
+ */
 
-                accept_err = accept_socket->ops->getname(accept_socket,(struct sockaddr *)client, &addr_len, 2);
-
-
-		}
-
-	sock_release(listen_socket);
-}
-*/
-//communication between people
-
-typedef struct
-{
-	char name [20];
-	unsigned char ip[5];
-	unsigned int port;
-	struct socket *sock;
-}people;
-
-struct socket *connect_person(u32 adress,int port)
-{
-	struct socket *person_socket = NULL;
-	struct sockaddr_in saddr;
-	int ret;
-	DECLARE_WAIT_QUEUE_HEAD(recv_wait);
-	ret = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &person_socket);
-	if(ret<0) 
-		{
-		printk(KERN_INFO "Could not connect to socket\n");
-		return NULL;
-		}
-	memset(&saddr, 0, sizeof(saddr));
-        saddr.sin_family = AF_INET;
-        saddr.sin_port = htons(port);
-        saddr.sin_addr.s_addr = htonl(adress);
-
-        ret = person_socket->ops->connect(person_socket, (struct sockaddr *)&saddr , sizeof(saddr), O_RDWR);
-	if(ret && (ret != -EINPROGRESS))
-		{
-		printk(KERN_INFO "Could not connect to person\n");
-		return NULL;
-		}
-	return person_socket;
-}
-#define	COM_LENGTH      26
-typedef union
-{
-	struct
-	{
-		uint8_t version;
-		uint32_t my_name;
-		uint16_t my_id;
-		uint32_t other_name;
-		uint16_t other_id;
-		uint8_t type;	
-		uint64_t identifier;
-		uint32_t extra_length;
-	} __attribute__((__packed__));
-	char str[COM_LENGTH];		/* Additional details for this command */
-} __attribute__((__packed__)) comHeader;
-#define com_identity		0
-#define com_hello 		1
-#define com_ping 		2
-#define com_ping_return		3
-#define com_message		4
-
-#define com_start_prot		10
-#define com_send_int		11
-
-
-//end communication between people
 
 
 #define cmd_identity		0	/* Identity (do nothing, wait one step) */
@@ -469,9 +340,8 @@ typedef union
 
 
 
-
 #define usr_identity   11
-#define noti_f 1
+#define noti_f 0
 typedef struct {
 	int task;
 	int first;
@@ -494,7 +364,12 @@ typedef struct {
 #define max_prog 50
 #define amount_qubits 10
 //typedef enum { false, true } bool;
-
+typedef struct
+{
+	char name [20];
+	unsigned char ip[5];
+	unsigned int port;
+}people;
 typedef struct
 {
 	
@@ -960,810 +835,6 @@ int cqc_response(OS *self)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-struct socket *my_sockets[10];
-//server from server code
-
-
-static int tcp_listener_stopped = 0;
-static int tcp_acceptor_stopped = 0;
-#define MODULE_NAME "tmem_tcp_server"
-DEFINE_SPINLOCK(tcp_server_lock);
-#define MAX_CONNS 16
-struct tcp_conn_handler_data
-{
-        struct sockaddr_in *address;
-        struct socket *accept_socket;
-        int thread_id;
-};
-
-struct tcp_conn_handler
-{
-        struct tcp_conn_handler_data *data[MAX_CONNS];
-        struct task_struct *thread[MAX_CONNS];
-        int tcp_conn_handler_stopped[MAX_CONNS]; 
-};
-
-struct tcp_conn_handler *tcp_conn_handler;
-
-
-struct tcp_server_service
-{
-      int running;  
-      struct socket *listen_socket;
-      struct task_struct *thread;
-      struct task_struct *accept_thread;
-};
-
-struct tcp_server_service *tcp_server;
-
-char *inet_ntoa(struct in_addr *in)
-{
-        char *str_ip = NULL;
-        u_int32_t int_ip = 0;
-        
-        str_ip = kmalloc(16 * sizeof(char), GFP_KERNEL);
-
-        if(!str_ip)
-                return NULL;
-        else
-                memset(str_ip, 0, 16);
-
-        int_ip = in->s_addr;
-
-        sprintf(str_ip, "%d.%d.%d.%d", (int_ip) & 0xFF, (int_ip >> 8) & 0xFF,
-                                 (int_ip >> 16) & 0xFF, (int_ip >> 16) & 0xFF);
-        
-        return str_ip;
-}
-
-int tcp_server_send(struct socket *sock, int id, const char *buf,\
-                const size_t length, unsigned long flags)
-{
-        struct msghdr msg;
-        struct kvec vec;
-        int len, written = 0, left =length;
-        mm_segment_t oldmm;
-
-        msg.msg_name    = 0;
-        msg.msg_namelen = 0;
-        msg.msg_control = NULL;
-        msg.msg_controllen = 0;
-        msg.msg_flags = flags;
-        msg.msg_flags   = 0;
-
-        oldmm = get_fs(); set_fs(KERNEL_DS);
-
-repeat_send:
-        vec.iov_len = left;
-        vec.iov_base = (char *)buf + written;
-
-        len = kernel_sendmsg(sock, &msg, &vec, left, left);
-        
-        if((len == -ERESTARTSYS) || (!(flags & MSG_DONTWAIT) &&\
-                                (len == -EAGAIN)))
-                goto repeat_send;
-
-        if(len > 0)
-        {
-                written += len;
-                left -= len;
-                if(left)
-                        goto repeat_send;
-        }
-        
-        set_fs(oldmm);
-        return written?written:len;
-}
-
-int tcp_server_receive(struct socket *sock, int id,struct sockaddr_in *address,\
-                unsigned char *buf,int size, unsigned long flags)
-{
-        struct msghdr msg;
-        struct kvec vec;
-        int len;
-        char *tmp = NULL;
-        
-        if(sock==NULL)
-        {
-                pr_info(" *** mtp | tcp server receive socket is NULL| "
-                        " tcp_server_receive *** \n");
-                return -1;
-        }
-
-        msg.msg_name = 0;
-        msg.msg_namelen = 0;
-        msg.msg_control = NULL;
-        msg.msg_controllen = 0;
-        msg.msg_flags = flags;
-
-        vec.iov_len = size;
-        vec.iov_base = buf;
-
-read_again:
-
-        /*
-        if(kthread_should_stop())
-        {
-                pr_info(" *** mtp | tcp server handle connection thread "
-                        "stopped | tcp_server_receive *** \n");
-                //tcp_conn_handler->thread[id] = NULL;
-                tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
-                //sock_release(sock);
-                do_exit(0);
-        }
-        */
-
-        if(!skb_queue_empty(&sock->sk->sk_receive_queue))
-                pr_info("recv queue empty ? %s \n",
-                skb_queue_empty(&sock->sk->sk_receive_queue)?"yes":"no");
-
-        len = kernel_recvmsg(sock, &msg, &vec, size, size, flags);
-
-        if(len == -EAGAIN || len == -ERESTARTSYS)
-                goto read_again;
-        
-        tmp = inet_ntoa(&(address->sin_addr));
-
-        pr_info("client-> %s:%d, says: %s\n", tmp, ntohs(address->sin_port), buf);
-
-        kfree(tmp);
-        //len = msg.msg_iter.kvec->iov_len;
-        return len;
-}
-
-int connection_handler(void *data)
-{
-       struct tcp_conn_handler_data *conn_data = 
-               (struct tcp_conn_handler_data *)data;
-
-       struct sockaddr_in *address = conn_data->address;
-       struct socket *accept_socket = conn_data->accept_socket;
-       int id = conn_data->thread_id;
-
-       int ret; 
-       int len = 49;
-       unsigned char in_buf[len+1];
-       unsigned char out_buf[len+1];
-       //char *tmp;
-
-       DECLARE_WAITQUEUE(recv_wait, current);
-       allow_signal(SIGKILL|SIGSTOP);
-
-
-       /*
-       while((ret = tcp_server_receive(accept_socket, id, in_buf, len,\
-                                       MSG_DONTWAIT)))
-       while(tcp_server_receive(accept_socket, id, in_buf, len,\
-                                       MSG_DONTWAIT))
-       */
-       while(1)
-       {
-               /*
-               if(kthread_should_stop())
-               {
-                       pr_info(" *** mtp | tcp server acceptor thread "
-                               "stopped | tcp_server_accept *** \n");
-                       tcp_acceptor_stopped = 1;
-                       do_exit(0);
-               }
-               if(ret == 0)
-               */
-
-              add_wait_queue(&accept_socket->sk->sk_wq->wait, &recv_wait);  
-
-              while(skb_queue_empty(&accept_socket->sk->sk_receive_queue))
-              {
-                      __set_current_state(TASK_INTERRUPTIBLE);
-                      schedule_timeout(HZ);
-
-                      if(kthread_should_stop())
-                      {
-                              pr_info(" *** mtp | tcp server handle connection "
-                                "thread stopped | connection_handler *** \n");
-
-                              //tcp_conn_handler->thread[id] = NULL;
-                              tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
-
-                              __set_current_state(TASK_RUNNING);
-                              remove_wait_queue(&accept_socket->sk->sk_wq->wait,\
-                                              &recv_wait);
-                              kfree(tcp_conn_handler->data[id]->address);
-                              kfree(tcp_conn_handler->data[id]);
-                        sock_release(tcp_conn_handler->data[id]->accept_socket);
-                              /*
-                              tcp_conn_handler->thread[id] = NULL;
-                              sock_release(sock);
-                              do_exit(0);
-                              */
-                              return 0;
-                      }
-
-                      if(signal_pending(current))
-                      {
-                              __set_current_state(TASK_RUNNING);
-                              remove_wait_queue(&accept_socket->sk->sk_wq->wait,\
-                                              &recv_wait);
-                              /*
-                              kfree(tcp_conn_handler->data[id]->address);
-                              kfree(tcp_conn_handler->data[id]);
-                              sock_release(tcp_conn_handler->data[id]->accept_socket);
-                              */
-                              goto out;
-                      }
-              }
-              __set_current_state(TASK_RUNNING);
-              remove_wait_queue(&accept_socket->sk->sk_wq->wait, &recv_wait);
-
-
-              pr_info("receiving message\n");
-              memset(in_buf, 0, len+1);
-              ret = tcp_server_receive(accept_socket, id, address, in_buf, len,\
-                                       MSG_DONTWAIT);
-              if(ret > 0)
-              {
-
-
-                      if(memcmp(in_buf, "HOLA", 4) == 0)
-                      {
-                              memset(out_buf, 0, len+1);
-                              strcat(out_buf, "HOLASI");
-                              pr_info("sending response: %s\n", out_buf);
-                              tcp_server_send(accept_socket, id, out_buf,\
-                                              strlen(out_buf), MSG_DONTWAIT);
-                      }
-		      if(1)
-			{
-				tcp_server_send(accept_socket, id, in_buf,strlen(in_buf), MSG_DONTWAIT);
-				pr_info("ping back: %s\n", in_buf);
-			}
-
-                      /*
-                      tmp = inet_ntoa(&(address->sin_addr));
-                      pr_info("connection handler: %d of: %s %d done sending "
-                              " HOLASI\n", id, tmp, ntohs(address->sin_port));
-                      kfree(tmp);
-                      */
-                      if(memcmp(in_buf, "ADIOS", 5) == 0)
-                      {
-                              memset(out_buf, 0, len+1);
-                              strcat(out_buf, "ADIOSAMIGO");
-                              pr_info("sending response: %s\n", out_buf);
-                              tcp_server_send(accept_socket, id, out_buf,\
-                                              strlen(out_buf), MSG_DONTWAIT);
-                              break;
-                      }
-              }
-       }
-
-out:
-       /* 
-       tmp = inet_ntoa(&(address->sin_addr));
-
-       pr_info("connection handler: %d of: %s %d exiting normally\n",
-                       id, tmp, ntohs(address->sin_port));
-       kfree(tmp);
-       */
-       tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
-       kfree(tcp_conn_handler->data[id]->address);
-       kfree(tcp_conn_handler->data[id]);
-       sock_release(tcp_conn_handler->data[id]->accept_socket);
-       //spin_lock(&tcp_server_lock);
-       tcp_conn_handler->thread[id] = NULL;
-       //spin_unlock(&tcp_server_lock);
-       //return 0;
-       do_exit(0);
-}
-
-int tcp_server_accept(void)
-{
-        int accept_err = 0;
-        struct socket *socket;
-        struct socket *accept_socket = NULL;
-        struct inet_connection_sock *isock; 
-        int id = 0;
-        /*
-        int len = 49;
-        unsigned char in_buf[len+1];
-        unsigned char out_buf[len+1];
-        */
-        DECLARE_WAITQUEUE(accept_wait, current);
-        /*
-        spin_lock(&tcp_server_lock);
-        tcp_server->running = 1;
-        current->flags |= PF_NOFREEZE;
-        */
-        allow_signal(SIGKILL|SIGSTOP);
-        //spin_unlock(&tcp_server_lock);
-
-        socket = tcp_server->listen_socket;
-        pr_info(" *** mtp | creating the accept socket | tcp_server_accept "
-                "*** \n");
-        /*
-        accept_socket = 
-        (struct socket*)kmalloc(sizeof(struct socket), GFP_KERNEL);
-        */
-
-        while(1)
-        {
-                struct tcp_conn_handler_data *data = NULL;
-                struct sockaddr_in *client = NULL;
-                char *tmp;
-                int addr_len;
-
-                accept_err =  
-                        sock_create(socket->sk->sk_family, socket->type,\
-                                    socket->sk->sk_protocol, &accept_socket);
-                        /*
-                        sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,\
-                                        &accept_socket);
-                        */
-
-                if(accept_err < 0 || !accept_socket)
-                {
-                        pr_info(" *** mtp | accept_error: %d while creating "
-                                "tcp server accept socket | "
-                                "tcp_server_accept *** \n", accept_err);
-                        goto err;
-                }
-
-                accept_socket->type = socket->type;
-                accept_socket->ops  = socket->ops;
-
-                isock = inet_csk(socket->sk);
-
-        //while(1)
-        //{
-               /*
-               struct tcp_conn_handler_data *data = NULL;
-               struct sockaddr_in *client = NULL;
-               char *tmp;
-               int addr_len;
-               */
-                
-               add_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
-               while(reqsk_queue_empty(&isock->icsk_accept_queue))
-               {
-                       __set_current_state(TASK_INTERRUPTIBLE);
-                       //set_current_state(TASK_INTERRUPTIBLE);
-
-                       //change this HZ to about 5 mins in jiffies
-                       schedule_timeout(HZ);
-
-                        //pr_info("icsk queue empty ? %s \n",
-                //reqsk_queue_empty(&isock->icsk_accept_queue)?"yes":"no");
-
-                        //pr_info("recv queue empty ? %s \n",
-                //skb_queue_empty(&socket->sk->sk_receive_queue)?"yes":"no");
-                       if(kthread_should_stop())
-                       {
-                               pr_info(" *** mtp | tcp server acceptor thread "
-                                       "stopped | tcp_server_accept *** \n");
-                               tcp_acceptor_stopped = 1;
-                               __set_current_state(TASK_RUNNING);
-                               remove_wait_queue(&socket->sk->sk_wq->wait,\
-                                               &accept_wait);
-                               sock_release(accept_socket);
-                               //do_exit(0);
-                               return 0;
-                       }
-
-                       if(signal_pending(current))
-                       {
-                               __set_current_state(TASK_RUNNING);
-                               remove_wait_queue(&socket->sk->sk_wq->wait,\
-                                               &accept_wait);
-                               goto release;
-                       }
-
-               } 
-               __set_current_state(TASK_RUNNING);
-               remove_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
-
-               pr_info("accept connection\n");
-
-               accept_err = 
-                       socket->ops->accept(socket, accept_socket, O_NONBLOCK);
-
-               if(accept_err < 0)
-               {
-                       pr_info(" *** mtp | accept_error: %d while accepting "
-                               "tcp server | tcp_server_accept *** \n",
-                               accept_err);
-                       goto release;
-               }
-
-               client = kmalloc(sizeof(struct sockaddr_in), GFP_KERNEL);   
-               memset(client, 0, sizeof(struct sockaddr_in));
-
-               addr_len = sizeof(struct sockaddr_in);
-
-               accept_err = 
-               accept_socket->ops->getname(accept_socket,\
-                               (struct sockaddr *)client,\
-                               &addr_len, 2);
-
-               if(accept_err < 0)
-               {
-                       pr_info(" *** mtp | accept_error: %d in getname "
-                               "tcp server | tcp_server_accept *** \n",
-                               accept_err);
-                       goto release;
-               }
-
-
-               tmp = inet_ntoa(&(client->sin_addr));
-
-               pr_info("connection from: %s %d \n",
-                       tmp, ntohs(client->sin_port));
-
-               kfree(tmp);
-
-               /*
-               memset(in_buf, 0, len+1);
-               pr_info("receive the package\n");
-               */
-               pr_info("handle connection\n");
-
-               /*
-               while((accept_err = tcp_server_receive(accept_socket, in_buf,\
-                                               len, MSG_DONTWAIT)))
-               {*/
-                       /* not needed here
-                       if(kthread_should_stop())
-                       {
-                               pr_info(" *** mtp | tcp server acceptor thread "
-                                       "stopped | tcp_server_accept *** \n");
-                               tcp_acceptor_stopped = 1;
-                               do_exit(0);
-                       }
-                       */
-                /*
-                       if(accept_err == 0)
-                               continue;
-
-                       memset(out_buf, 0, len+1);
-                       strcat(out_buf, "kernel server: hi");
-                       pr_info("sending the package\n");
-                       tcp_server_send(accept_socket, out_buf, strlen(out_buf),\
-                                       MSG_DONTWAIT);
-               }
-               */
-
-               /*should I protect this against concurrent access?*/
-               for(id = 0; id < MAX_CONNS; id++)
-               {
-                        //spin_lock(&tcp_server_lock);
-                        if(tcp_conn_handler->thread[id] == NULL)
-                                break;
-                        //spin_unlock(&tcp_server_lock);
-               }
-
-               pr_info("gave free id: %d\n", id);
-
-               if(id == MAX_CONNS)
-                       goto release;
-
-               data = kmalloc(sizeof(struct tcp_conn_handler_data), GFP_KERNEL);
-               memset(data, 0, sizeof(struct tcp_conn_handler_data));
-
-               data->address = client;
-               data->accept_socket = accept_socket;
-               data->thread_id = id;
-
-               tcp_conn_handler->tcp_conn_handler_stopped[id] = 0;
-               tcp_conn_handler->data[id] = data;
-               //tcp_conn_handler->thread[id] = 
-               //kthread_run((void *)connection_handler, (void *)data, MODULE_NAME);
-
-               if(kthread_should_stop())
-               {
-                       pr_info(" *** mtp | tcp server acceptor thread stopped"
-                               " | tcp_server_accept *** \n");
-                       tcp_acceptor_stopped = 1;
-                       /*
-                       kfree(tcp_conn_handler->data[id]->address);
-                       kfree(tcp_conn_handler->data[id]);
-                       sock_release(tcp_conn_handler->data[id]->accept_socket);
-                       kfree(accept_socket);
-                       do_exit(0);
-                       */
-                       return 0;
-               }
-                        
-               if(signal_pending(current))
-               {
-                       /*
-                       kfree(tcp_conn_handler->data[id]->address);
-                       kfree(tcp_conn_handler->data[id]);
-                       goto err;
-                       */
-                       break;
-               }
-        //}
-        }
-
-        /*
-        kfree(tcp_conn_handler->data[id]->address);
-        kfree(tcp_conn_handler->data[id]);
-        sock_release(tcp_conn_handler->data[id]->accept_socket);
-        */
-        tcp_acceptor_stopped = 1;
-        //return 0;
-        do_exit(0);
-release: 
-       sock_release(accept_socket);
-err:
-       tcp_acceptor_stopped = 1;
-       //return -1;
-       do_exit(0);
-}
-
-int tcp_server_listen(void)
-{
-        int server_err;
-        struct socket *conn_socket;
-        struct sockaddr_in server;
-
-        DECLARE_WAIT_QUEUE_HEAD(wq);
-
-        //spin_lock(&tcp_server_lock);
-        //tcp_server->running = 1;
-        allow_signal(SIGKILL|SIGTERM);         
-        //spin_unlock(&tcp_server_lock);
-
-        server_err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,\
-                                &tcp_server->listen_socket);
-        if(server_err < 0)
-        {
-                pr_info(" *** mtp | Error: %d while creating tcp server "
-                        "listen socket | tcp_server_listen *** \n", server_err);
-                goto err;
-        }
-
-        conn_socket = tcp_server->listen_socket;
-        tcp_server->listen_socket->sk->sk_reuse = 1;
-
-        //server.sin_addr.s_addr = htonl(INADDR_ANY);
-        server.sin_addr.s_addr = INADDR_ANY;
-        server.sin_family = AF_INET;
-        server.sin_port = htons(DEFAULT_PORT);
-
-        server_err = 
-        conn_socket->ops->bind(conn_socket, (struct sockaddr*)&server,\
-                        sizeof(server));
-
-        if(server_err < 0)
-        {
-                pr_info(" *** mtp | Error: %d while binding tcp server "
-                        "listen socket | tcp_server_listen *** \n", server_err);
-                goto release;
-        }
-
-        //while(1)
-        //{
-        server_err = conn_socket->ops->listen(conn_socket, 16);
-
-        if(server_err < 0)
-        {
-                pr_info(" *** mtp | Error: %d while listening in tcp "
-                        "server listen socket | tcp_server_listen "
-                        "*** \n", server_err);
-                        goto release;
-        }
-
-        tcp_server->accept_thread = 
-                kthread_run((void*)tcp_server_accept, NULL, MODULE_NAME);
-
-        while(1)
-        {
-                wait_event_timeout(wq, 0, 3*HZ);
-
-                if(kthread_should_stop())
-                {
-                        pr_info(" *** mtp | tcp server listening thread"
-                                " stopped | tcp_server_listen *** \n");
-                        /*
-                        tcp_listener_stopped = 1;
-                        sock_release(conn_socket);
-                        do_exit(0);
-                        */
-                        return 0;
-                }
-
-                if(signal_pending(current))
-                        goto release;
-        }
-        //}
-
-        sock_release(conn_socket);
-        tcp_listener_stopped = 1;
-        //return 0;
-        do_exit(0);
-release:
-        sock_release(conn_socket);
-err:
-        tcp_listener_stopped = 1;
-        //return -1;
-        do_exit(0);
-}
-
-int tcp_server_start(void)
-{
-        tcp_server->running = 1;
-        tcp_server->thread = kthread_run((void *)tcp_server_listen, NULL,\
-                                        MODULE_NAME);
-        return 0;
-}
-
-int network_server_init(void)
-{
-        pr_info(" *** mtp | network_server initiated | "
-                "network_server_init ***\n");
-        tcp_server = kmalloc(sizeof(struct tcp_server_service), GFP_KERNEL);
-        memset(tcp_server, 0, sizeof(struct tcp_server_service));
-
-        tcp_conn_handler = kmalloc(sizeof(struct tcp_conn_handler), GFP_KERNEL);
-        memset(tcp_conn_handler, 0, sizeof(struct tcp_conn_handler));
-
-        tcp_server_start();
-        return 0;
-}
-
-void network_server_exit(void)
-{
-        int ret;
-        int id;
-
-        if(tcp_server->thread == NULL)
-                pr_info(" *** mtp | No kernel thread to kill | "
-                        "network_server_exit *** \n");
-        else
-        {
-                for(id = 0; id < MAX_CONNS; id++)
-                {
-                        if(tcp_conn_handler->thread[id] != NULL)
-                        {
-
-                        if(!tcp_conn_handler->tcp_conn_handler_stopped[id])
-                                {
-                                        ret = 
-                                kthread_stop(tcp_conn_handler->thread[id]);
-
-                                        if(!ret)
-                                                pr_info(" *** mtp | tcp server "
-                                                "connection handler thread: %d "
-                                                "stopped | network_server_exit "
-                                                "*** \n", id);
-                                }
-                       }
-                }
-
-                if(!tcp_acceptor_stopped)
-                {
-                        ret = kthread_stop(tcp_server->accept_thread);
-                        if(!ret)
-                                pr_info(" *** mtp | tcp server acceptor thread"
-                                        " stopped | network_server_exit *** \n");
-                }
-
-                if(!tcp_listener_stopped)
-                {
-                        ret = kthread_stop(tcp_server->thread);
-                        if(!ret)
-                                pr_info(" *** mtp | tcp server listening thread"
-                                        " stopped | network_server_exit *** \n");
-                }
-
-
-                if(tcp_server->listen_socket != NULL && !tcp_listener_stopped)
-                {
-                        sock_release(tcp_server->listen_socket);
-                        tcp_server->listen_socket = NULL;
-                }
-
-                kfree(tcp_conn_handler);
-                kfree(tcp_server);
-                tcp_server = NULL;
-        }
-
-        pr_info(" *** mtp | network server module unloaded | "
-                "network_server_exit *** \n");
-}
-//server ending
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-comHeader com;
-int add_person(struct socket *sock)
-{
-	com.version=0;
-	com.my_name=PORT%10;
-	com.my_id=PORT;
-	com.other_name=0;
-	tcp_client_send(sock,com.str, sizeof(com.str), MSG_DONTWAIT);
-	return 0;
-}
 command my_c0;
 command my_c1;
 command my_c2;
@@ -1774,19 +845,10 @@ int prog_id;
 //char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
 #define waiting 1
-
 int looping(void)
-{	
-	struct socket *test_con;
-	u8 ip[]={192,168,1,2,'\0'};
+{
 	int lauf;
-	int id;
 	int run;
-	network_server_init();
-	printk("network_server established\n");
-	test_con= connect_person(create_address(ip),DEFAULT_PORT);
-	if(test_con!=NULL)
-   		add_person(test_con);
 	run=0;
 	for(lauf=0;lauf<20*20*10+(1-waiting)*10000000;++lauf)
 	{
@@ -1813,20 +875,12 @@ int looping(void)
 			run=0;
 			}
 		//msleep(100);
-		for(id = 0; id < MAX_CONNS; id++)
-               		{
-                        if(tcp_conn_handler->thread[id] != NULL)
-                                add_person(tcp_conn_handler->data[id]->accept_socket);
-               		}
-
 		cqc_response(&my_os);
 	}
 	return 1;
 }
 struct task_struct *main_thread;
-
 static int __init ebbchar_init(void){
-   
    cqcHeader cqcH;
    cqcH.version=2;
    printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM %d \n",cqcH.version);
@@ -1856,8 +910,22 @@ static int __init ebbchar_init(void){
    printk(KERN_INFO "CL:establish TCP connection");
    tcp_client_connect();
    OS_init(&my_os);
-   
-   
+   /*printk(KERN_INFO "start tests\n");
+   p.cur=0;
+   p.app_id=7;
+   p.code=kmalloc(sizeof(command *)*10,GFP_KERNEL);
+   p.size=4;
+   my_c0.task=cmd_new_qubit; my_c0.first=5;p.code[0]=&my_c0;
+   my_c1.task=cmd_xrot; my_c1.first=5; my_c1.second=128;p.code[1]=&my_c1;
+   my_c2.task=cmd_meas_rm; my_c2.first=5;p.code[2]=&my_c2;
+   my_c3.task=cmd_done; my_c3.first=5;p.code[3]=&my_c3;
+   printk(KERN_INFO "Prog is initialized,%d\n",(int)(sizeof(command *)));
+   OS_init(&my_os);
+   printk(KERN_INFO "OS_init");
+   prog_id=OS_insert_p(&my_os,&p);
+   printk(KERN_INFO "Added prog");
+   OS_start_p(&my_os,prog_id);
+   printk(KERN_INFO "Prog ready, This will start the code");*/
 
    main_thread=kthread_run((void *)looping, NULL,DEVICE_NAME);
    
@@ -1920,7 +988,6 @@ static void __exit ebbchar_exit(void){
 	kfree(reply);
 	kfree(p.code);
 	printk(KERN_INFO "half is released,pointer: %p\n",main_thread);
-	network_server_exit();
 	/*if(main_thread!=NULL)
 		kthread_stop(main_thread);
 	else
