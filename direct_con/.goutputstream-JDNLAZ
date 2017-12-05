@@ -1950,7 +1950,7 @@ int looping(void)
 		add_person(create_address(ip),DEFAULT_PORT,test_con);
 		}*/
 	run=0;
-	for(lauf=0;lauf<20*20*50+(1-waiting)*10000000;++lauf)
+	for(lauf=0;lauf<20*20*10+(1-waiting)*10000000;++lauf)
 	{
 		if(kthread_should_stop()) 
 			{
