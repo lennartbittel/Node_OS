@@ -16,8 +16,8 @@
 
 #include <linux/delay.h>
 
-#define DEFAULT_PORT 8852
-#define CONNECT_PORT DEFAULT_PORT
+#define DEFAULT_PORT 8850
+#define CONNECT_PORT 8850
 #define MODULE_NAME "ksocket2"
 #define INADDR_SEND ((unsigned long int)0xC0A80102) /* 127.0.0.1 */
 //#define INADDR_SEND INADDR_LOOPBACK
@@ -144,7 +144,6 @@ struct con_infos *connect_to_ip(unsigned long address)
 	infos->sock=sock_send;
 	infos->addr=&addr_send;
 	infos->ip=address;
-	printk("added person,%d\n",infos->ip);
 	return infos;
 close_and_out:
         sock_release(sock_send);
@@ -156,11 +155,8 @@ int get_id_of_ip(unsigned long address)
 	int i;
 	for(i=0;i<max_con;++i)
 		if(regist[i]!=NULL)
-			{
-			printk("%d,%d\n",regist[i]->addr->sin_addr.s_addr,address);
-			if(regist[i]->ip==address)
+			if(regist[i]->addr->sin_addr.s_addr==address)
 				return i;
-			}
 	return -1;
 }
 int get_empty_id(void)
@@ -176,15 +172,12 @@ void prog(void)
 	int i,id,size;
 	int bufsize = 100;
         unsigned char buf[bufsize+1];
-        kthread->running = 1;
-	allow_signal(SIGKILL);
-        current->flags |= PF_NOFREEZE;
-	regist=kmalloc(sizeof(struct con_infos *)*max_con, GFP_KERNEL);
+	regist=kmalloc(sizeof(struct con_infos)*max_con, GFP_KERNEL);
 	for(i=0;i<max_con;++i)
 		regist[i]=NULL;
 	socket_open();
 	
-	for(i=0;i<1000;++i)
+	for(i=0,1000,++i)
 	{
 		memset(&buf, 0, bufsize+1);
                 size = ksocket_receive(sock, &addr, buf, bufsize);
@@ -193,23 +186,20 @@ void prog(void)
 			
 		if (signal_pending(current))
                         break;
-		msleep(50);
 		if(size>0)
 		{
 			id=get_id_of_ip(addr.sin_addr.s_addr);
 			if(id==-1)
 				{
 				id=get_empty_id();
-				printk("gotten new id%d\n",id);
 				regist[id]=connect_to_ip(addr.sin_addr.s_addr);
 				}
-			printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);
-			//printk(KERN_INFO MODULE_NAME": received %d bytes\n", size);
+			printk("Inaddr: current s_addr:%d", addr.sin_addr.s_addr);
+			printk(KERN_INFO MODULE_NAME": received %d bytes\n", size);
 		        printk("data: %s\n", buf);
 		}
 	}
-	printk("Prog over\n");
-	kthread->running =0;
+	
 }
 static void ksocket_start(void)
 {
@@ -388,17 +378,17 @@ void __exit ksocket_exit(void)
                         printk(KERN_INFO MODULE_NAME": unknown error %d while trying to terminate kernel thread\n",-err);
                 else 
                 {
-                        //while (kthread->running == 1)
+                        while (kthread->running == 1)
                                 msleep(10);
                         printk(KERN_INFO MODULE_NAME": succesfully killed kernel thread!\n");
                 }
         }
 
         /* free allocated resources before exit */
-        if (sock != NULL) 
+        if (kthread->sock != NULL) 
         {
-                sock_release(sock);
-                sock = NULL;
+                sock_release(kthread->sock);
+                kthread->sock = NULL;
         }
 
         kfree(kthread);

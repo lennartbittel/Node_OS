@@ -33,7 +33,7 @@ union Get_prog *read_in(char *file_name,int prio)
 	if (file) 
 		{
 		int i=0;
-		printf("file opend\n");
+		printf("file opend: %s\n",file_name);
 		strcpy(prog->name,file_name);
 		prog->prio=prio;	
 		while(fgets(c,100,file)!=NULL)
@@ -59,9 +59,9 @@ union Get_prog *read_in(char *file_name,int prio)
 	return prog;
 }
 
-int main(){
+int main(int argc, char *argv[]){
    struct timeval time;
-   union Get_prog *prog=read_in("progs/prog2",10);
+   union Get_prog *prog=read_in(argv[1],10);
    printf("%d,%d",prog->prio,prog->str[100]);
    printf("size: %zu\n",sizeof(union Get_prog));
    int ret, fd;

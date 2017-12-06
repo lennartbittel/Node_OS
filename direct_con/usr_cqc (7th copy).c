@@ -30,8 +30,7 @@
 //#include "cqc.h"
 #include <linux/sched.h>   //wake_up_process()
 #include <linux/kthread.h> //kthread_create(), kthread_run()
-#define dev_int_name 1
-#define PORT 8820+dev_int_name
+#define PORT 8821
 
 //#include "udp_net/mod.h"
 
@@ -127,276 +126,6 @@ typedef union {
 //shit from client
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-struct con_infos;
-
-#define max_con 20
-struct con_infos **regist;
-
-
-#define DEFAULT_PORT 8852
-struct socket *sock;
-struct sockaddr_in addr;
-
-int socket_open(void);
-int my_kill_proc(pid_t pid, int sig);
-int ksocket_receive(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len);
-int ksocket_send(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len);
-struct con_infos *connect_to_ip(unsigned long address);
-int get_id_of_ip(unsigned long address);
-int get_empty_id(void);
-
-
-
-
-int my_kill_proc(pid_t pid, int sig) {
-    int error = -ESRCH;           /* default return value */
-    struct task_struct* p;
-    struct task_struct* t = NULL; 
-    struct pid* pspid;
-    rcu_read_lock();
-    p = &init_task;               /* start at init */
-    do {
-        if (p->pid == pid) {      /* does the pid (not tgid) match? */
-            t = p;    
-            break;
-        }
-        p = next_task(p);         /* "this isn't the task you're looking for" */
-    } while (p != &init_task);    /* stop when we get back to init */
-    if (t != NULL) {
-        pspid = t->pids[PIDTYPE_PID].pid;
-        if (pspid != NULL) error = kill_pid(pspid,sig,1);
-    }
-    rcu_read_unlock();
-    return error;
-}
-
-
-/* function prototypes */
-
-
-int socket_open(void)
-{
-
-	int  err;
-
-        current->flags |= PF_NOFREEZE;
-	allow_signal(SIGKILL);
-	if ( (err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock)) < 0)
-	{
-		printk(KERN_INFO ": Could not create a datagram socket, error = %d\n", -ENXIO);
-                goto out;
-	}
-	memset(&addr, 0, sizeof(struct sockaddr));
-	addr.sin_family      = AF_INET;
-	addr.sin_addr.s_addr      = htonl(INADDR_ANY);
-	addr.sin_port      = htons(DEFAULT_PORT);
-	if ( (err = sock->ops->bind(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr) ) ) < 0)
-        {
-                printk(KERN_INFO ": Could not bind or connect to socket, error = %d\n", -err);
-                goto close_and_out;
-        }
-	printk(KERN_INFO": listening on port %d\n", DEFAULT_PORT);
-	/*while(1)
-	{
-		memset(&buf, 0, bufsize+1);
-                size = ksocket_receive(sock, &addr, buf, bufsize);
-		if (signal_pending(current))
-                        break;
-		printk("Inaddr: %d/%d,current s_addr:%d",INADDR_ANY,htonl(INADDR_ANY), addr.sin_addr.s_addr);
-		printk(KERN_INFO MODULE_NAME": received %d bytes\n", size);
-                printk("data: %s\n", buf);
-	}*/
-	return 0;
-close_and_out:
-        sock_release(sock);
-	sock = NULL;
-	return -1;
-
-out:
-	return -2;
-}
-struct con_infos{
-	char name[10];
-	int name_num;
-	unsigned long ip;
-	struct socket *sock;
-	struct sockaddr_in *addr;
-};
-
-
-struct con_infos *connect_to_ip(unsigned long address)
-{
-	int err;
-	struct socket *sock_send;
-        struct sockaddr_in addr_send;
-	struct con_infos *infos=kmalloc(sizeof(struct con_infos), GFP_KERNEL);
-	if((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock_send)) < 0 )
-	{
-                printk(KERN_INFO": could not create socket for new person %d\n", -ENXIO);
-                return NULL;
-        }
-	memset(&addr_send, 0, sizeof(struct sockaddr));
-	addr_send.sin_family = AF_INET;
-	addr_send.sin_addr.s_addr = address;
-	addr_send.sin_port = htons(DEFAULT_PORT);	
-	if(( err = sock_send->ops->connect(sock_send, (struct sockaddr *)&addr_send, sizeof(struct sockaddr), 0) )< 0 )
-	{
-	        printk(KERN_INFO": Could not connect to IP,err:%d\n", -err);
-                goto close_and_out;
-	}
-	infos->sock=sock_send;
-	infos->addr=&addr_send;
-	infos->ip=address;
-	printk("added person,%d\n",infos->ip);
-	return infos;
-close_and_out:
-        sock_release(sock_send);
-        sock_send = NULL;
-	return NULL;
-}
-int get_id_of_ip(unsigned long address)
-{
-	int i;
-	for(i=0;i<max_con;++i)
-		if(regist[i]!=NULL)
-			{
-			printk("%d,%d\n",regist[i]->addr->sin_addr.s_addr,address);
-			if(regist[i]->ip==address)
-				return i;
-			}
-	return -1;
-}
-int get_id_of_dev_id(int dev_id)
-{
-	int i;
-	for(i=0;i<max_con;++i)
-		if(regist[i]!=NULL)
-			{
-			printk("%d,%d\n",regist[i]->name_num,dev_id);
-			if(regist[i]->name_num==dev_id)
-				return i;
-			}
-	return -1;
-}
-int get_empty_id(void)
-{
-	int i;
-	for(i=0;i<max_con;++i)
-		if(regist[i]==NULL)
-			return i;
-	return max_con;
-}
-
-
-int ksocket_send(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len)
-{
-        struct msghdr msg;
-        struct kvec vec;
-        mm_segment_t oldfs;
-        int size = 0;
-
-        if (sock->sk==NULL)
-           return 0;
-
-        vec.iov_base = buf;
-        vec.iov_len = len;
-
-        msg.msg_flags = MSG_DONTWAIT;
-        msg.msg_name = addr;
-        msg.msg_namelen  = sizeof(struct sockaddr_in);
-        msg.msg_control = NULL;
-        msg.msg_controllen = 0;
-        //msg.msg_iov = &iov;
-        //msg.msg_iovlen = 1;
-        msg.msg_control = NULL;
-
-        oldfs = get_fs();
-        set_fs(KERNEL_DS);
-	size=kernel_sendmsg(sock, &msg, &vec, len, len);
-        //size = sock_sendmsg(sock,&msg);
-	//size=___sys_sendmsg(sock,&msg,&msg_sys,MSG_DONTWAIT,NULL,0);
-	printk("res:%d\n",size);
-        set_fs(oldfs);
-
-        return size;
-}
-
-int ksocket_receive(struct socket* sock, struct sockaddr_in* addr, unsigned char* buf, int len)
-{
-        struct msghdr msg;
-        struct kvec vec;
-        mm_segment_t oldfs;
-        int size = 0;
-
-        if (sock->sk==NULL) return 0;
-
-        vec.iov_base = buf;
-        vec.iov_len = len;
-
-        msg.msg_flags = 0;
-        msg.msg_name = addr;
-        msg.msg_namelen  = sizeof(struct sockaddr_in);
-        msg.msg_control = NULL;
-        msg.msg_controllen = 0;
-        //msg.msg_iov = &iov;
-        //msg.msg_iovlen = 1;
-        msg.msg_control = NULL;
-
-        oldfs = get_fs();
-        set_fs(KERNEL_DS);
-	size = kernel_recvmsg(sock, &msg, &vec,len,len, MSG_DONTWAIT);
-        //size = sock_recvmsg(sock,&msg,len,msg.msg_flags);
-        set_fs(oldfs);
-
-        return size;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 struct socket *conn_socket = NULL;
 
 u32 create_address(u8 *ip)
@@ -471,7 +200,7 @@ int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int ma
 
         return len;
 }
-unsigned char destip[5] = {192,168,1,1 ,'\0'};
+
 int tcp_client_connect(void)
 {
         struct sockaddr_in saddr;
@@ -479,7 +208,7 @@ int tcp_client_connect(void)
         struct sockaddr_in daddr;
         struct socket *data_socket = NULL;
         */
-        
+        unsigned char destip[5] = {192,168,1,1 ,'\0'};
         /*
         char *response = kmalloc(4096, GFP_KERNEL);
         char *reply = kmalloc(4096, GFP_KERNEL);
@@ -668,7 +397,7 @@ people **net_people;
 
 
 
-/*
+
 struct socket *connect_person(u32 adress,int port)
 {
 	struct socket *person_socket = NULL;
@@ -694,7 +423,30 @@ struct socket *connect_person(u32 adress,int port)
 		}
 	return person_socket;
 }
+#define	COM_LENGTH      26
+typedef union
+{
+	struct
+	{
+		uint8_t version;
+		uint32_t my_name;
+		uint16_t my_id;
+		uint32_t other_name;
+		uint16_t other_id;
+		uint8_t type;	
+		uint64_t identifier;
+		uint32_t extra_length;
+	} __attribute__((__packed__));
+	char str[COM_LENGTH];		/* Additional details for this command */
+} __attribute__((__packed__)) comHeader;
+#define com_identity		0
+#define com_hello 		1
+#define com_ping 		2
+#define com_ping_return		3
+#define com_message		4
 
+#define com_start_prot		10
+#define com_send_int		11
 int person_send(people *contact,int cmd, int prot_id,char *ad_mes)
 {
 	int res;
@@ -732,7 +484,7 @@ int person_recv(people *contact)
 	printk("Message recieved from: %d,with type:%d\n",comH.my_id,comH.type);
 	return 0;
 }
-*/
+
 //end communication between people
 
 
@@ -761,10 +513,9 @@ int person_recv(people *contact)
 #define cmd_if			100
 #define cmd_goto		101
 
-#define cmd_sendc		201 	//person_name, var
-#define cmd_recvc		202	//person_name, var 
 
 #define cmd_done		1000
+
 
 
 
@@ -792,23 +543,7 @@ typedef struct {
 #define max_prog 50
 #define amount_qubits 10
 //typedef enum { false, true } bool;
-#define	COM_LENGTH      34
-typedef union
-{
-	struct
-	{
-		uint8_t version;
-		uint32_t send_name;
-		uint16_t send_id;//prog_id
-		uint32_t recv_name;
-		uint16_t recv_id; //prog_id
-		uint8_t type;	
-		uint64_t identifier; //the input of the ms
-		uint64_t ms;
-		uint32_t extra_length;
-	} __attribute__((__packed__));
-	char str[COM_LENGTH];		/* Additional details for this command */
-} __attribute__((__packed__)) comHeader;
+
 typedef struct
 {
 	
@@ -849,7 +584,6 @@ int perform_cmd(OS *self)
 	cur=*(prog->code[prog->cur]);
 	//printk(KERN_INFO "Taks started:%d, %d\n",prog->cur,cur.task);
 	//cqc_task
-	
 	if(cur.task==cmd_if) //if statement
 		{
 			if(prog->codevar[cur.first])
@@ -858,32 +592,12 @@ int perform_cmd(OS *self)
 			
 		}
 	else if (cur.task==cmd_goto)
-		prog->cur=cur.first;
+		prog->cur=cur.second;
 	else if (cur.task==cmd_done)
 		{
 			printk(KERN_INFO "Task %s is finished, the results are: %d,%d",prog->name, prog->codevar[0],prog->codevar[1]);
 			OS_sleep_p(self,index);
 			return 0;
-		}
-	if(cur.task==cmd_recvc)
-		{
-			OS_sleep_p(self,index);
-			++(prog->cur);
-			return 0;
-		}
-	if(cur.task==cmd_sendc)
-		{
-			int id;
-			comHeader comH;
-			comH.version=5;
-			comH.send_name=dev_int_name;
-			comH.send_id=prog->app_id;
-			
-			id=get_id_of_dev_id(cur.first);
-			comH.recv_name=regist[id]->name_num;
-			comH.recv_id=cur.third;
-			comH.ms=prog->codevar[cur.second];
-			ksocket_send(regist[id]->sock, regist[id]->addr, comH.str, sizeof(comH.str));
 		}
 	cqcH.version = 0;
 	cqcH.app_id = prog->app_id;
@@ -953,9 +667,7 @@ int perform_cmd(OS *self)
 	else if(cur.task==cmd_sendq || cur.task==cmd_recvq || cur.task==cmd_eprq) //connection with bell pairs
 		{
 			cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
-			xtra.remote_node=htonl(create_address(destip));
-			xtra.remote_port=htons(8820+cur.second);
-			xtra.remote_app_id=cur.third;
+			xtra.xtra_qubit_id=cur.second;
 			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
 			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
 			tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
@@ -1320,54 +1032,886 @@ int cqc_response(OS *self)
 
 
 
-#define com_identity		0
-#define com_hello 		1
-#define com_ping 		2
-#define com_ping_return		3
-#define com_message		4
-
-#define com_start_prot		10
-#define com_send_int		11
 
 
-comHeader comH;
 
-int classical_recv(OS *self)
+
+
+struct socket *my_sockets[10];
+//server from server code
+
+
+static int tcp_listener_stopped = 0;
+static int tcp_acceptor_stopped = 0;
+#define MODULE_NAME "tmem_tcp_server"
+DEFINE_SPINLOCK(tcp_server_lock);
+#define MAX_CONNS 16
+struct tcp_conn_handler_data
 {
-	printk("staring classical recv\n");
-	int size,id,res;
-	//int bufsize = 100;
-        //unsigned char buf[bufsize+1];
-	size = ksocket_receive(sock, &addr, comH.str, sizeof(comH.str));
-	printk("smth was recv%d\n ",size);
-	if(size>0)
-		{
-		id=get_id_of_ip(addr.sin_addr.s_addr);
-		if(id==-1)
-			{
-			id=get_empty_id();
-			printk("gotten new id%d\n",id);
-			regist[id]=connect_to_ip(addr.sin_addr.s_addr);
-			}
-		printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);
+        struct sockaddr_in *address;
+        struct socket *accept_socket;
+        int thread_id;
+};
 
-		printk("data: version %d,prog_id %d, cmd %d, identifier: %d,ms: %d\n",comH.version,comH.recv_id,comH.type,comH.identifier,comH.ms);
-		if( comH.send_name!=regist[id]->name_num)
-			{
-			printk("name does not fit or is new. change %d to %d",regist[id]->name_num,comH.send_name);
-			regist[id]->name_num=comH.send_name;
-			}
-		if(comH.type==com_send_int)
-			{
-			res=OS_find_appid(self,comH.recv_id);
-			if(self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first!=comH.send_name)
-				printk("The id of the programs do not match. Try to continue however: %d,%d\n",self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first ,comH.send_name);
-			self->Sleeping[res]->codevar[self->Sleeping[res]->code[self->Sleeping[res]->cur -1]->second]=comH.ms;
-			OS_wakeup_p(self,res);
-			}
-		}	
+struct tcp_conn_handler
+{
+        struct tcp_conn_handler_data *data[MAX_CONNS];
+        struct task_struct *thread[MAX_CONNS];
+        int tcp_conn_handler_stopped[MAX_CONNS]; 
+};
+
+struct tcp_conn_handler *tcp_conn_handler;
+
+
+struct tcp_server_service
+{
+      int running;  
+      struct socket *listen_socket;
+      struct task_struct *thread;
+      struct task_struct *accept_thread;
+};
+
+struct tcp_server_service *tcp_server;
+
+char *inet_ntoa(struct in_addr *in)
+{
+        char *str_ip = NULL;
+        u_int32_t int_ip = 0;
+        
+        str_ip = kmalloc(16 * sizeof(char), GFP_KERNEL);
+
+        if(!str_ip)
+                return NULL;
+        else
+                memset(str_ip, 0, 16);
+
+        int_ip = in->s_addr;
+
+        sprintf(str_ip, "%d.%d.%d.%d", (int_ip) & 0xFF, (int_ip >> 8) & 0xFF,
+                                 (int_ip >> 16) & 0xFF, (int_ip >> 16) & 0xFF);
+        
+        return str_ip;
 }
 
+int tcp_server_send(struct socket *sock, int id, const char *buf,\
+                const size_t length, unsigned long flags)
+{
+        struct msghdr msg;
+        struct kvec vec;
+        int len, written = 0, left =length;
+        mm_segment_t oldmm;
+
+        msg.msg_name    = 0;
+        msg.msg_namelen = 0;
+        msg.msg_control = NULL;
+        msg.msg_controllen = 0;
+        msg.msg_flags = flags;
+        msg.msg_flags   = 0;
+
+        oldmm = get_fs(); set_fs(KERNEL_DS);
+
+repeat_send:
+        vec.iov_len = left;
+        vec.iov_base = (char *)buf + written;
+
+        len = kernel_sendmsg(sock, &msg, &vec, left, left);
+        
+        if((len == -ERESTARTSYS) || (!(flags & MSG_DONTWAIT) &&\
+                                (len == -EAGAIN)))
+		return -1;
+                //goto repeat_send;
+
+        if(len > 0)
+        {
+                written += len;
+                left -= len;
+                if(left)
+                        goto repeat_send;
+        }
+        printk("stuff was sent");
+        set_fs(oldmm);
+        return written?written:len;
+}
+
+int tcp_server_receive(struct socket *sock, int id,struct sockaddr_in *address,\
+                unsigned char *buf,int size, unsigned long flags)
+{
+        struct msghdr msg;
+        struct kvec vec;
+        int len;
+        char *tmp = NULL;
+        
+        if(sock==NULL)
+        {
+                pr_info(" *** mtp | tcp server receive socket is NULL| "
+                        " tcp_server_receive *** \n");
+                return -1;
+        }
+
+        msg.msg_name = 0;
+        msg.msg_namelen = 0;
+        msg.msg_control = NULL;
+        msg.msg_controllen = 0;
+        msg.msg_flags = flags;
+
+        vec.iov_len = size;
+        vec.iov_base = buf;
+
+read_again:
+
+        /*
+        if(kthread_should_stop())
+        {
+                pr_info(" *** mtp | tcp server handle connection thread "
+                        "stopped | tcp_server_receive *** \n");
+                //tcp_conn_handler->thread[id] = NULL;
+                tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
+                //sock_release(sock);
+                do_exit(0);
+        }
+        */
+
+        if(!skb_queue_empty(&sock->sk->sk_receive_queue))
+                pr_info("recv queue empty ? %s \n",
+                skb_queue_empty(&sock->sk->sk_receive_queue)?"yes":"no");
+
+        len = kernel_recvmsg(sock, &msg, &vec, size, size, flags);
+
+        if(len == -EAGAIN || len == -ERESTARTSYS)
+		{
+		printk("Did not work via server\n");
+		return -1;
+		}
+                //goto read_again;
+        
+        tmp = inet_ntoa(&(address->sin_addr));
+
+        pr_info("client-> %s:%d, says: %s\n", tmp, ntohs(address->sin_port), buf);
+
+        kfree(tmp);
+        //len = msg.msg_iter.kvec->iov_len;
+        return len;
+}
+
+int connection_handler(void *data)
+{
+       struct tcp_conn_handler_data *conn_data = 
+               (struct tcp_conn_handler_data *)data;
+
+       struct sockaddr_in *address = conn_data->address;
+       struct socket *accept_socket = conn_data->accept_socket;
+       int id = conn_data->thread_id;
+
+       int ret; 
+       int len = 49;
+       unsigned char in_buf[len+1];
+       unsigned char out_buf[len+1];
+       //char *tmp;
+
+       DECLARE_WAITQUEUE(recv_wait, current);
+       allow_signal(SIGKILL|SIGSTOP);
+
+
+       /*
+       while((ret = tcp_server_receive(accept_socket, id, in_buf, len,\
+                                       MSG_DONTWAIT)))
+       while(tcp_server_receive(accept_socket, id, in_buf, len,\
+                                       MSG_DONTWAIT))
+       */
+       while(1)
+       {
+               /*
+               if(kthread_should_stop())
+               {
+                       pr_info(" *** mtp | tcp server acceptor thread "
+                               "stopped | tcp_server_accept *** \n");
+                       tcp_acceptor_stopped = 1;
+                       do_exit(0);
+               }
+               if(ret == 0)
+               */
+
+              add_wait_queue(&accept_socket->sk->sk_wq->wait, &recv_wait);  
+
+              while(skb_queue_empty(&accept_socket->sk->sk_receive_queue))
+              {
+                      __set_current_state(TASK_INTERRUPTIBLE);
+                      schedule_timeout(HZ);
+
+                      if(kthread_should_stop())
+                      {
+                              pr_info(" *** mtp | tcp server handle connection "
+                                "thread stopped | connection_handler *** \n");
+
+                              //tcp_conn_handler->thread[id] = NULL;
+                              tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
+
+                              __set_current_state(TASK_RUNNING);
+                              remove_wait_queue(&accept_socket->sk->sk_wq->wait,\
+                                              &recv_wait);
+                              kfree(tcp_conn_handler->data[id]->address);
+                              kfree(tcp_conn_handler->data[id]);
+                        sock_release(tcp_conn_handler->data[id]->accept_socket);
+                              /*
+                              tcp_conn_handler->thread[id] = NULL;
+                              sock_release(sock);
+                              do_exit(0);
+                              */
+                              return 0;
+                      }
+
+                      if(signal_pending(current))
+                      {
+                              __set_current_state(TASK_RUNNING);
+                              remove_wait_queue(&accept_socket->sk->sk_wq->wait,\
+                                              &recv_wait);
+                              /*
+                              kfree(tcp_conn_handler->data[id]->address);
+                              kfree(tcp_conn_handler->data[id]);
+                              sock_release(tcp_conn_handler->data[id]->accept_socket);
+                              */
+                              goto out;
+                      }
+              }
+              __set_current_state(TASK_RUNNING);
+              remove_wait_queue(&accept_socket->sk->sk_wq->wait, &recv_wait);
+
+
+              pr_info("receiving message\n");
+              memset(in_buf, 0, len+1);
+              ret = tcp_server_receive(accept_socket, id, address, in_buf, len,\
+                                       MSG_DONTWAIT);
+              if(ret > 0)
+              {
+
+
+                      if(memcmp(in_buf, "HOLA", 4) == 0)
+                      {
+                              memset(out_buf, 0, len+1);
+                              strcat(out_buf, "HOLASI");
+                              pr_info("sending response: %s\n", out_buf);
+                              tcp_server_send(accept_socket, id, out_buf,\
+                                              strlen(out_buf), MSG_DONTWAIT);
+                      }
+		      if(1)
+			{
+				tcp_server_send(accept_socket, id, in_buf,strlen(in_buf), MSG_DONTWAIT);
+				pr_info("ping back: %s\n", in_buf);
+			}
+
+                      /*
+                      tmp = inet_ntoa(&(address->sin_addr));
+                      pr_info("connection handler: %d of: %s %d done sending "
+                              " HOLASI\n", id, tmp, ntohs(address->sin_port));
+                      kfree(tmp);
+                      */
+                      if(memcmp(in_buf, "ADIOS", 5) == 0)
+                      {
+                              memset(out_buf, 0, len+1);
+                              strcat(out_buf, "ADIOSAMIGO");
+                              pr_info("sending response: %s\n", out_buf);
+                              tcp_server_send(accept_socket, id, out_buf,\
+                                              strlen(out_buf), MSG_DONTWAIT);
+                              break;
+                      }
+              }
+       }
+
+out:
+       /* 
+       tmp = inet_ntoa(&(address->sin_addr));
+
+       pr_info("connection handler: %d of: %s %d exiting normally\n",
+                       id, tmp, ntohs(address->sin_port));
+       kfree(tmp);
+       */
+       tcp_conn_handler->tcp_conn_handler_stopped[id]= 1;
+       kfree(tcp_conn_handler->data[id]->address);
+       kfree(tcp_conn_handler->data[id]);
+       sock_release(tcp_conn_handler->data[id]->accept_socket);
+       //spin_lock(&tcp_server_lock);
+       tcp_conn_handler->thread[id] = NULL;
+       //spin_unlock(&tcp_server_lock);
+       //return 0;
+       do_exit(0);
+}
+int add_person(uint32_t addr,int port ,struct socket *socket)
+{
+	
+	int id = 0;
+	int used=0;
+	printk("adding new person\n");
+               for(id = 0; id < MAX_CONNS; id++)
+               {
+			
+                        if(net_people[id] != NULL)
+				{
+				printk("connection %d exists: %d,%d\n",id,net_people[id]->ip,addr);
+                                if(net_people[id]->ip==addr)
+					used=1;
+				}
+               }
+		if(!used)
+			for(id = 0; id < MAX_CONNS; id++)
+               		{
+                        	if(net_people[id] == NULL)
+					{
+					net_people[id]=kmalloc(sizeof(people),GFP_KERNEL);
+					net_people[id]->ip=addr;
+					net_people[id]->port=ntohs(port);
+					net_people[id]->sock=socket;
+					printk("new person created %d,ip:%d\n",id,addr);
+					return 0;
+					}
+               		}
+	return 0;
+}
+struct sockaddr_in *test_rm;
+int tcp_server_accept(void)
+{
+        int accept_err = 0;
+        struct socket *socket;
+        struct socket *accept_socket = NULL;
+        struct inet_connection_sock *isock; 
+	int id;
+        /*
+        int len = 49;
+        unsigned char in_buf[len+1];
+        unsigned char out_buf[len+1];
+        */
+        DECLARE_WAITQUEUE(accept_wait, current);
+        /*
+        spin_lock(&tcp_server_lock);
+        tcp_server->running = 1;
+        current->flags |= PF_NOFREEZE;
+        */
+        allow_signal(SIGKILL|SIGSTOP);
+        //spin_unlock(&tcp_server_lock);
+
+        socket = tcp_server->listen_socket;
+        pr_info(" *** mtp | creating the accept socket | tcp_server_accept "
+                "*** \n");
+        /*
+        accept_socket = 
+        (struct socket*)kmalloc(sizeof(struct socket), GFP_KERNEL);
+        */
+
+        while(1)
+        {
+                struct tcp_conn_handler_data *data = NULL;
+                struct sockaddr_in *client = NULL;
+                char *tmp;
+                int addr_len;
+
+                accept_err =  
+                        sock_create(socket->sk->sk_family, socket->type,\
+                                    socket->sk->sk_protocol, &accept_socket);
+                        /*
+                        sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,\
+                                        &accept_socket);
+                        */
+
+                if(accept_err < 0 || !accept_socket)
+                {
+                        pr_info(" *** mtp | accept_error: %d while creating "
+                                "tcp server accept socket | "
+                                "tcp_server_accept *** \n", accept_err);
+                        goto err;
+                }
+
+                accept_socket->type = socket->type;
+                accept_socket->ops  = socket->ops;
+
+                isock = inet_csk(socket->sk);
+
+        //while(1)
+        //{
+               /*
+               struct tcp_conn_handler_data *data = NULL;
+               struct sockaddr_in *client = NULL;
+               char *tmp;
+               int addr_len;
+               */
+               printk("just before accepting\n");
+               add_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
+               while(reqsk_queue_empty(&isock->icsk_accept_queue))
+               {
+                       __set_current_state(TASK_INTERRUPTIBLE);
+                       //set_current_state(TASK_INTERRUPTIBLE);
+
+                       //change this HZ to about 5 mins in jiffies
+                       schedule_timeout(HZ);
+
+                        //pr_info("icsk queue empty ? %s \n",
+                //reqsk_queue_empty(&isock->icsk_accept_queue)?"yes":"no");
+
+                        //pr_info("recv queue empty ? %s \n",
+                //skb_queue_empty(&socket->sk->sk_receive_queue)?"yes":"no");
+                       if(kthread_should_stop())
+                       {
+                               pr_info(" *** mtp | tcp server acceptor thread "
+                                       "stopped | tcp_server_accept *** \n");
+                               tcp_acceptor_stopped = 1;
+                               __set_current_state(TASK_RUNNING);
+                               remove_wait_queue(&socket->sk->sk_wq->wait,\
+                                               &accept_wait);
+                               sock_release(accept_socket);
+                               //do_exit(0);
+                               return 0;
+                       }
+
+                       if(signal_pending(current))
+                       {
+                               __set_current_state(TASK_RUNNING);
+                               remove_wait_queue(&socket->sk->sk_wq->wait,\
+                                               &accept_wait);
+                               goto release;
+                       }
+
+               } 
+               __set_current_state(TASK_RUNNING);
+               remove_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
+
+               pr_info("accept connection\n");
+
+               accept_err = 
+                       socket->ops->accept(socket, accept_socket, O_NONBLOCK);
+
+               if(accept_err < 0)
+               {
+                       pr_info(" *** mtp | accept_error: %d while accepting "
+                               "tcp server | tcp_server_accept *** \n",
+                               accept_err);
+                       goto release;
+               }
+
+               client = kmalloc(sizeof(struct sockaddr_in), GFP_KERNEL);   
+               memset(client, 0, sizeof(struct sockaddr_in));
+
+               addr_len = sizeof(struct sockaddr_in);
+
+               accept_err = 
+               accept_socket->ops->getname(accept_socket,\
+                               (struct sockaddr *)client,\
+                               &addr_len, 2);
+
+               if(accept_err < 0)
+               {
+                       pr_info(" *** mtp | accept_error: %d in getname "
+                               "tcp server | tcp_server_accept *** \n",
+                               accept_err);
+                       goto release;
+               }
+
+
+               tmp = inet_ntoa(&(client->sin_addr));
+
+               pr_info("connection from: %s %d \n",
+                       tmp, ntohs(client->sin_port));
+
+               kfree(tmp);
+
+               /*
+               memset(in_buf, 0, len+1);
+               pr_info("receive the package\n");
+               */
+               pr_info("handle connection\n");
+
+               /*
+               while((accept_err = tcp_server_receive(accept_socket, in_buf,\
+                                               len, MSG_DONTWAIT)))
+               {*/
+                       /* not needed here
+                       if(kthread_should_stop())
+                       {
+                               pr_info(" *** mtp | tcp server acceptor thread "
+                                       "stopped | tcp_server_accept *** \n");
+                               tcp_acceptor_stopped = 1;
+                               do_exit(0);
+                       }
+                       */
+                /*
+                       if(accept_err == 0)
+                               continue;
+
+                       memset(out_buf, 0, len+1);
+                       strcat(out_buf, "kernel server: hi");
+                       pr_info("sending the package\n");
+                       tcp_server_send(accept_socket, out_buf, strlen(out_buf),\
+                                       MSG_DONTWAIT);
+               }
+               */
+
+
+
+		//my connecting structure
+		
+		test_rm = client;
+		add_person(client->sin_addr.s_addr,client->sin_port,socket);
+		//end of my connecting structure		
+
+
+		
+
+               /*should I protect this against concurrent access?*/
+               for(id = 0; id < MAX_CONNS; id++)
+               {
+                        //spin_lock(&tcp_server_lock);
+                        if(tcp_conn_handler->thread[id] == NULL)
+                                break;
+                        //spin_unlock(&tcp_server_lock);
+               }
+
+               pr_info("gave free id: %d\n", id);
+
+               if(id == MAX_CONNS)
+                       goto release;
+
+               data = kmalloc(sizeof(struct tcp_conn_handler_data), GFP_KERNEL);
+               memset(data, 0, sizeof(struct tcp_conn_handler_data));
+
+               data->address = client;
+               data->accept_socket = accept_socket;
+               data->thread_id = id;
+
+               tcp_conn_handler->tcp_conn_handler_stopped[id] = 0;
+               tcp_conn_handler->data[id] = data;
+               //tcp_conn_handler->thread[id] = 
+               kthread_run((void *)connection_handler, (void *)data, MODULE_NAME);
+
+               if(kthread_should_stop())
+               {
+                       pr_info(" *** mtp | tcp server acceptor thread stopped"
+                               " | tcp_server_accept *** \n");
+                       tcp_acceptor_stopped = 1;
+                       /*
+                       kfree(tcp_conn_handler->data[id]->address);
+                       kfree(tcp_conn_handler->data[id]);
+                       sock_release(tcp_conn_handler->data[id]->accept_socket);
+                       kfree(accept_socket);
+                       do_exit(0);
+                       */
+                       return 0;
+               }
+                        
+               if(signal_pending(current))
+               {
+                       /*
+                       kfree(tcp_conn_handler->data[id]->address);
+                       kfree(tcp_conn_handler->data[id]);
+                       goto err;
+                       */
+                       break;
+               }
+        //}
+        }
+
+        /*
+        kfree(tcp_conn_handler->data[id]->address);
+        kfree(tcp_conn_handler->data[id]);
+        sock_release(tcp_conn_handler->data[id]->accept_socket);
+        */
+        tcp_acceptor_stopped = 1;
+        //return 0;
+        do_exit(0);
+release: 
+       sock_release(accept_socket);
+err:
+       tcp_acceptor_stopped = 1;
+       //return -1;
+       do_exit(0);
+}
+
+int tcp_server_listen(void)
+{
+        int server_err;
+        struct socket *conn_socket;
+        struct sockaddr_in server;
+
+        DECLARE_WAIT_QUEUE_HEAD(wq);
+
+        //spin_lock(&tcp_server_lock);
+        //tcp_server->running = 1;
+        allow_signal(SIGKILL|SIGTERM);         
+        //spin_unlock(&tcp_server_lock);
+
+        server_err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,\
+                                &tcp_server->listen_socket);
+        if(server_err < 0)
+        {
+                pr_info(" *** mtp | Error: %d while creating tcp server "
+                        "listen socket | tcp_server_listen *** \n", server_err);
+                goto err;
+        }
+
+        conn_socket = tcp_server->listen_socket;
+        tcp_server->listen_socket->sk->sk_reuse = 1;
+
+        //server.sin_addr.s_addr = htonl(INADDR_ANY);
+        server.sin_addr.s_addr = INADDR_ANY;
+        server.sin_family = AF_INET;
+        server.sin_port = htons(DEFAULT_PORT);
+
+        server_err = 
+        conn_socket->ops->bind(conn_socket, (struct sockaddr*)&server,\
+                        sizeof(server));
+
+        if(server_err < 0)
+        {
+                pr_info(" *** mtp | Error: %d while binding tcp server "
+                        "listen socket | tcp_server_listen *** \n", server_err);
+                goto release;
+        }
+
+        //while(1)
+        //{
+        server_err = conn_socket->ops->listen(conn_socket, 16);
+
+        if(server_err < 0)
+        {
+                pr_info(" *** mtp | Error: %d while listening in tcp "
+                        "server listen socket | tcp_server_listen "
+                        "*** \n", server_err);
+                        goto release;
+        }
+
+        tcp_server->accept_thread = 
+                kthread_run((void*)tcp_server_accept, NULL, MODULE_NAME);
+
+        while(1)
+        {
+                wait_event_timeout(wq, 0, 3*HZ);
+
+                if(kthread_should_stop())
+                {
+                        pr_info(" *** mtp | tcp server listening thread"
+                                " stopped | tcp_server_listen *** \n");
+                        /*
+                        tcp_listener_stopped = 1;
+                        sock_release(conn_socket);
+                        do_exit(0);
+                        */
+                        return 0;
+                }
+
+                if(signal_pending(current))
+                        goto release;
+        }
+        //}
+
+        sock_release(conn_socket);
+        tcp_listener_stopped = 1;
+        //return 0;
+        do_exit(0);
+release:
+        sock_release(conn_socket);
+err:
+        tcp_listener_stopped = 1;
+        //return -1;
+        do_exit(0);
+}
+
+int tcp_server_start(void)
+{
+        tcp_server->running = 1;
+        tcp_server->thread = kthread_run((void *)tcp_server_listen, NULL,\
+                                        MODULE_NAME);
+        return 0;
+}
+
+int network_server_init(void)
+{
+        pr_info(" *** mtp | network_server initiated | "
+                "network_server_init ***\n");
+        tcp_server = kmalloc(sizeof(struct tcp_server_service), GFP_KERNEL);
+        memset(tcp_server, 0, sizeof(struct tcp_server_service));
+
+        tcp_conn_handler = kmalloc(sizeof(struct tcp_conn_handler), GFP_KERNEL);
+        memset(tcp_conn_handler, 0, sizeof(struct tcp_conn_handler));
+
+        tcp_server_start();
+        return 0;
+}
+
+void network_server_exit(void)
+{
+        int ret;
+        int id;
+
+        if(tcp_server->thread == NULL)
+                pr_info(" *** mtp | No kernel thread to kill | "
+                        "network_server_exit *** \n");
+        else
+        {
+                for(id = 0; id < MAX_CONNS; id++)
+                {
+                        if(tcp_conn_handler->thread[id] != NULL)
+                        {
+
+                        if(!tcp_conn_handler->tcp_conn_handler_stopped[id])
+                                {
+                                        ret = 
+                                kthread_stop(tcp_conn_handler->thread[id]);
+
+                                        if(!ret)
+                                                pr_info(" *** mtp | tcp server "
+                                                "connection handler thread: %d "
+                                                "stopped | network_server_exit "
+                                                "*** \n", id);
+                                }
+                       }
+                }
+
+                if(!tcp_acceptor_stopped)
+                {
+                        ret = kthread_stop(tcp_server->accept_thread);
+                        if(!ret)
+                                pr_info(" *** mtp | tcp server acceptor thread"
+                                        " stopped | network_server_exit *** \n");
+                }
+
+                if(!tcp_listener_stopped)
+                {
+                        ret = kthread_stop(tcp_server->thread);
+                        if(!ret)
+                                pr_info(" *** mtp | tcp server listening thread"
+                                        " stopped | network_server_exit *** \n");
+                }
+
+
+                if(tcp_server->listen_socket != NULL && !tcp_listener_stopped)
+                {
+                        sock_release(tcp_server->listen_socket);
+                        tcp_server->listen_socket = NULL;
+                }
+
+                kfree(tcp_conn_handler);
+                kfree(tcp_server);
+                tcp_server = NULL;
+        }
+
+        pr_info(" *** mtp | network server module unloaded | "
+                "network_server_exit *** \n");
+}
+//server ending
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int send_to_person(people *person,const char *buf,int length)
+{
+	struct msghdr msg;
+        struct kvec vec;
+        int len, written = 0, left =length;
+	mm_segment_t oldmm;
+
+	msg.msg_name    = 0;
+        msg.msg_namelen = 0;
+        msg.msg_control = NULL;
+        msg.msg_controllen = 0;
+        msg.msg_flags = MSG_DONTWAIT;
+        msg.msg_flags   = 0;
+	
+	oldmm = get_fs(); set_fs(KERNEL_DS);
+
+repeat_send:
+	
+	vec.iov_len = left;
+        vec.iov_base = (char *)buf + written;
+	len = kernel_sendmsg(person->sock, &msg, &vec, left, left);
+	printk("in send: %s\n",buf);
+        if((len == -ERESTARTSYS) || (!(MSG_DONTWAIT & MSG_DONTWAIT) && (len == -EAGAIN)))
+                goto repeat_send;
+        if(len > 0)
+        {
+                written += len;
+                left -= len;
+                if(left)
+                        goto repeat_send;
+        }
+        set_fs(oldmm);
+	printk("object was sent");
+        return written ? written:len;
+}
+int recv_from_person(people *person, char *buf,int max_size)
+{
+	struct msghdr msg;
+        struct kvec vec;
+        struct socket *sock=person->sock;
+	int len;
+        msg.msg_name    = 0;
+        msg.msg_namelen = 0;
+
+        msg.msg_control = NULL;
+        msg.msg_controllen = 0;
+        msg.msg_flags   = MSG_DONTWAIT;
+
+        vec.iov_len = max_size;
+        vec.iov_base = buf;
+	pr_info("recv queue empty ? %s \n",skb_queue_empty(&sock->sk->sk_receive_queue)?"yes":"no");
+        len = kernel_recvmsg(person->sock, &msg, &vec, max_size, max_size, MSG_DONTWAIT);
+	printk("len:%d,of %d,%d\n", len,EAGAIN,ERESTARTSYS);
+	//if(!skb_queue_empty(&sock->sk->sk_receive_queue))
+                
+        if(len == -EAGAIN || len == -ERESTARTSYS)
+        {
+                pr_info(" Error while reading: %d \n", len);
+
+        }
+
+        return len;
+}
+
+
+comHeader com;
 /*int add_person(struct socket *sock)
 {
 	
@@ -1395,15 +1939,18 @@ comHeader com_test;
 int looping(void)
 {	
 	struct socket *test_con;
-	u8 ip[]={192,168,1,3-dev_int_name,'\0'};
+	u8 ip[]={192,168,1,1,'\0'};
 	int lauf;
 	//int id;
 	int run;
-	run=socket_open();
-	printk("sock_con res:%d\n",run);
-	regist=kmalloc(sizeof(struct con_infos *)*max_con, GFP_KERNEL);
-	regist[0]=connect_to_ip(htonl(create_address(ip)));
-	
+	network_server_init();
+	printk("network_server established\n");
+	/*test_con= connect_person(create_address(ip),DEFAULT_PORT);
+	if(test_con!=NULL)
+		{
+		printk("found person under ip adress\n");
+		add_person(create_address(ip),DEFAULT_PORT,test_con);
+		}*/
 	run=0;
 	for(lauf=0;lauf<20*20*50+(1-waiting)*10000000;++lauf)
 	{
@@ -1418,22 +1965,39 @@ int looping(void)
 			//printk("no task performed in this round,run: %d\n",run);
 			run+=1;
 			}
-		
-		run=OS_givenext_p(&my_os);
-		if(run>-1)
+		if(1)
 			{
-			OS_start_p(&my_os,run);
-			OS_make_prio(&my_os);
+			run=OS_givenext_p(&my_os);
+			if(run>-1)
+			{
+				//printk("found newest %d\n",run);
+				 OS_start_p(&my_os,run);
+				OS_make_prio(&my_os);
 			}
-		run=0;
-			
+			run=0;
+			}
 		//msleep(100);
-		classical_recv(&my_os);
+		if(lauf %(40 +(1-waiting)*100000) == 0) 
+			{
+			printk("try to send\n");
+			for(test_i=0; test_i<MAX_CONNS; ++test_i)
+				{
+				if (net_people[test_i]!=NULL)
+					{
+					strcpy(test_str,"diese nachricht klappt hoffentlich\0");
+					test_res=send_to_person(net_people[test_i],test_str,sizeof(test_str));
+					printk("sent test:%d,%d\n",test_i,test_res);
+					memset(&test_strr, 0, 500);
+					test_res=recv_from_person(net_people[test_i],test_strr,sizeof(test_strr));
+					printk("recv test:%d,%d\n",test_i,test_res);
+					}
+				}
+			}
 		cqc_response(&my_os);
 	}
 	return 1;
 }
-/*void prog(void)
+void prog(void)
 {
 	int i,id,size;
 	int bufsize = 100;
@@ -1450,6 +2014,8 @@ int looping(void)
 		memset(&buf, 0, bufsize+1);
                 size = ksocket_receive(sock, &addr, buf, bufsize);
 
+			
+		msleep(50);
 		if(size>0)
 		{
 			id=get_id_of_ip(addr.sin_addr.s_addr);
@@ -1465,12 +2031,11 @@ int looping(void)
 		}
 	}
 	printk("Prog over\n");
-}*/
+}
 
 struct task_struct *main_thread;
 
-static int __init ebbchar_init(void)
-{
+static int __init ebbchar_init(void){
    int i;
    cqcHeader cqcH;
    cqcH.version=2;
@@ -1568,6 +2133,7 @@ static void __exit ebbchar_exit(void){
 	kfree(reply);
 	kfree(p.code);
 	printk(KERN_INFO "half is released,pointer: %p\n",main_thread);
+	network_server_exit();
 	/*if(main_thread!=NULL)
 		kthread_stop(main_thread);
 	else
