@@ -41,7 +41,7 @@ MODULE_DESCRIPTION("Node OS");  ///< The description -- see modinfo
 MODULE_VERSION("0.0.1");            ///< A version number to inform users
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
-static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
+//static char   message[256] = "hello this is a test";           ///< Memory for the string that is passed from userspace
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
@@ -264,7 +264,7 @@ struct con_infos *connect_to_ip(unsigned long address,int name)
 	infos->addr=&addr_send;
 	infos->ip=address;
 	infos->name_num=name;
-	printk("added person,%d\n",infos->ip);
+	printk("added person,%ld\n",infos->ip);
 	return infos;
 close_and_out:
         sock_release(sock_send);
@@ -277,7 +277,7 @@ int get_id_of_ip(unsigned long address)
 	for(i=0;i<max_con;++i)
 		if(regist[i]!=NULL)
 			{
-			printk("%d,%d\n",regist[i]->addr->sin_addr.s_addr,address);
+			printk("%d,%ld\n",regist[i]->addr->sin_addr.s_addr,address);
 			if(regist[i]->ip==address)
 				return i;
 			}
@@ -303,7 +303,7 @@ int print_con(void)
 		{
 		if(regist[i]!=NULL)
 			{
-			printk("id: %d name:%d,ip:%d\n",i,regist[i]->name_num,regist[i]->ip);
+			printk("id: %d name:%d,ip:%ld\n",i,regist[i]->name_num,regist[i]->ip);
 			}
 		}
 	printk("done\n");
@@ -486,7 +486,8 @@ int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int ma
 
         return len;
 }
-unsigned char destip[5] = {192,168,1,1 ,'\0'};
+//unsigned char destip[5] = {192,168,1,1 ,'\0'};
+unsigned char destip[5] = {131,180,82,194 ,'\0'};
 struct sockaddr_in saddr;
 int tcp_client_connect(void)
 {
@@ -797,12 +798,14 @@ typedef struct {
 	int state;
 	int priority;
 	command **code;
-	int codevar[10];
+	int *codevar;
+	int output_size;
 	int qubits[10];
 	int cur; //which line to evaluate next
 	int size;
 	int breaks;
 	int starting_time;
+	int status;
 	}Progs;
 #define max_prog 50
 #define amount_qubits 10
@@ -877,7 +880,9 @@ int perform_cmd(OS *self)
 	else if (cur.task==cmd_done)
 		{
 			printk(KERN_INFO "Task %s is finished, the results are: %d,%d",prog->name, prog->codevar[0],prog->codevar[1]);
+			prog->status=2;
 			OS_sleep_p(self,index);
+			
 			return 0;
 		}
 	if(cur.task==cmd_recvc)
@@ -1374,7 +1379,7 @@ int classical_recv(OS *self)
 			}
 		printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);
 
-		printk("data: version %d,prog_id %d, cmd %d, identifier: %d,ms: %d\n",comH.version,comH.recv_id,comH.type,comH.identifier,comH.ms);
+		printk("data: version %d,prog_id %d, cmd %d, identifier: %lld,ms: %lld\n",comH.version,comH.recv_id,comH.type,comH.identifier,comH.ms);
 		if( comH.send_name!=regist[id]->name_num)
 			{
 			printk("name does not fit or is new. change %d to %d",regist[id]->name_num,comH.send_name);
@@ -1419,7 +1424,7 @@ int test_i,test_res;
 comHeader com_test;
 int looping(void)
 {	
-	struct socket *test_con;
+	//struct socket *test_con;
 	u8 ip[]={192,168,1,3-dev_int_name,'\0'};
 	int lauf;
 	//int id;
@@ -1499,12 +1504,18 @@ int looping(void)
 }*/
 
 struct task_struct *main_thread;
-
+struct file *node_lis[10];
+Progs *prog_ids[10];
 static int __init ebbchar_init(void)
 {
    int i;
    cqcHeader cqcH;
    cqcH.version=2;
+   for(i=0;i<10;++i)
+	{
+	node_lis[i]=NULL;
+	prog_ids[i]=NULL;
+	}
    printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM %d \n",cqcH.version);
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
@@ -1616,8 +1627,39 @@ static void __exit ebbchar_exit(void){
  *  @param inodep A pointer to an inode object (defined in linux/fs.h)
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
+
+int find_node(struct file *node)
+{
+	int i=0;
+	for(i=0;i<10;++i)
+		{
+		if(node_lis[i]!=NULL)
+			{
+			if(node_lis[i]==node)
+				{
+				printk("found node: %p,%p\n",node_lis[i],node);
+				return i;
+				}
+			}
+		}
+	return -1;
+}
+int get_place(struct file *node)
+{
+	int i=0;
+	for(i=0;i<10;++i)
+	{
+		if(node_lis[i]==NULL)
+			{
+				node_lis[i]=node;
+				return i;
+			}
+	}
+	return -1;
+}
 static int dev_open1(struct inode *inodep, struct file *filep){
    numberOpens++;
+   printk("new node_nr:%d\n",get_place(filep));
    printk(KERN_INFO "EBBChar: Device has been opened %d time(s)\n", numberOpens);
    return 0;
 }
@@ -1630,16 +1672,41 @@ static int dev_open1(struct inode *inodep, struct file *filep){
  *  @param len The length of the b
  *  @param offset The offset if required
  */
+union return_msg {
+struct	{
+	int type;
+	int results[200];
+	};
+char str[200*4+4];
+};
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
+
+   union return_msg ret_ms;
+   int i;
    int error_count = 0;
+   int pos=find_node(filep);
+   
+   printk("Node number:%d, process:%d/%d \n",pos,prog_ids[pos]->cur,prog_ids[pos]->size);
+   if(prog_ids[pos]->status==2)
+	{
+   	ret_ms.type=1;
+	for (i=0;i<prog_ids[pos]->output_size;++i)
+		ret_ms.results[i]=prog_ids[pos]->codevar[i];
+	}
+   else
+	{
+	ret_ms.type=0;
+	ret_ms.results[0]=prog_ids[pos]->cur;
+	ret_ms.results[1]=prog_ids[pos]->size;
+	}
    // copy_to_user has the format ( * to, *from, size) and returns 0 on success
    
    
    //tcp_client_receive(conn_socket, message,MSG_DONTWAIT);
-   error_count = copy_to_user(buffer, message, sizeof(message));
+   error_count = copy_to_user(buffer, ret_ms.str, sizeof(ret_ms.str));
 
    if (error_count==0){            // if true then have success
-      printk(KERN_INFO "EBBChar: Sent %d characters to the user\n", size_of_message);
+      printk(KERN_INFO "EBBChar: Sent %ld characters to the user\n", sizeof(ret_ms.str));
       return (size_of_message=0);  // clear the position to the start and return 0
    }
    else {
@@ -1656,25 +1723,37 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param len The length of the array of data that is being passed in the const char buffer
  *  @param offset The offset if required
  */
+typedef struct {
+char ip[4];
+int name;
+}person;
 union Get_prog{
 	struct{
 		char name[100];
 		int prio;
 		int size;
-		command cmds[100];
+		int res_size;
+		int max_q;
+		person peop[10];
+		command cmds[400];
 		}__attribute__((__packed__));
-	char str[100+4+4+100*16];
+	char str[100+4+4+400*16];
 	};
 Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
 {
 	int i;
 	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
 	new_prog->code=kmalloc(sizeof(command *)  *  prog_input->size,GFP_KERNEL);
+	new_prog->output_size=prog_input->res_size;
+	new_prog->codevar=kmalloc(sizeof(int)*new_prog->output_size,GFP_KERNEL);
+	for(i=0;i< new_prog->output_size;++i)
+		new_prog->codevar[i]=0;
 	strcpy(new_prog->name,prog_input->name);
 	new_prog->priority=prog_input->prio;
 	new_prog->size=prog_input->size;
 	new_prog->cur=0;
 	new_prog->app_id=app_id;
+	new_prog->status=1;
 	for(i=0;i<prog_input->size;++i)
 		new_prog->code[i]=&(prog_input->cmds[i]);
 	return new_prog;
@@ -1687,12 +1766,16 @@ int str_rep( char *into,const char *from,int len)
 	return 0;
 }
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
+  
    union Get_prog *prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
    Progs *new_prog;
+   int pos=find_node(filep);
+   printk("Node number:%d\n",pos);
    
    str_rep(prog_shell->str,buffer,len); 
    printk("shell prio:%d\n",prog_shell->prio);
    new_prog=create_prog(prog_shell,300+numberOpens);
+   prog_ids[pos]=new_prog;
    //kfree(prog_shell);
    printk("new prog,%p \n",new_prog);
    printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
