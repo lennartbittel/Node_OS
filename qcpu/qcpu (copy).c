@@ -31,8 +31,7 @@
 #include <linux/sched.h>   //wake_up_process()
 #include <linux/kthread.h> //kthread_create(), kthread_run()
 #define MY_ID 1 //0 to 4
-#define PORT 8821+MY_ID
-#define DEFAULT_PORT 8850
+#define PORT 8820
 
 //#include "udp_net/mod.h"
 
@@ -48,10 +47,10 @@ struct parties
 struct parties np[4];
 int add_network_info(void)
 {
-np[0]=(struct parties){.name="Alice",.ip={192,168,1,1},.cqc_port=8821,.listening_port=8850,.sock=NULL,.addr=NULL};
-np[1]=(struct parties){.name="Bob",.ip={192,168,1,2},.cqc_port=8822,.listening_port=8850,.sock=NULL,.addr=NULL};
-np[2]=(struct parties){.name="Charlie",.ip={192,168,1,3},.cqc_port=8823,.listening_port=8850,.sock=NULL,.addr=NULL};
-np[3]=(struct parties){.name="David",.ip={192,168,1,4},.cqc_port=8824,.listening_port=8850,.sock=NULL,.addr=NULL};
+np[0]=(struct parties){.name="Alice",.ip={192,168,1,1},.cqc_port=8820,.listening_port=8850,.sock=NULL,.addr=NULL};
+np[1]=(struct parties){.name="Bob",.ip={192,168,1,2},.cqc_port=8821,.listening_port=8850,.sock=NULL,.addr=NULL};
+np[2]=(struct parties){.name="Charlie",.ip={192,168,1,3},.cqc_port=8822,.listening_port=8850,.sock=NULL,.addr=NULL};
+np[3]=(struct parties){.name="Daniel",.ip={192,168,1,4},.cqc_port=8823,.listening_port=8850,.sock=NULL,.addr=NULL};
 return 0;
 }
 struct parties my_info;
@@ -78,20 +77,6 @@ static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
  *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
  */
-u32 create_address(u8 *ip)
-{
-        u32 addr = 0;
-        int i;
-
-        for(i=0; i<4; i++)
-        {
-                addr += ip[i];
-                if(i==3)
-                        break;
-                addr <<= 8;
-        }
-        return addr;
-}
 static struct file_operations fops =
 {
    .open = dev_open1,
@@ -185,7 +170,7 @@ struct con_infos;
 struct con_infos **regist;
 
 
-
+#define DEFAULT_PORT 8850
 struct socket *sock;
 struct sockaddr_in addr;
 
@@ -193,7 +178,7 @@ int socket_open(void);
 int my_kill_proc(pid_t pid, int sig);
 int ksocket_receive(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len);
 int ksocket_send(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len);
-int connect_to_ip(struct parties *person);
+struct con_infos *connect_to_ip(unsigned long address,int name);
 int get_id_of_ip(unsigned long address);
 int get_empty_id(void);
 
@@ -267,43 +252,47 @@ close_and_out:
 out:
 	return -2;
 }
-/*struct con_infos{
+struct con_infos{
 	char name[10];
 	int name_num;
 	unsigned long ip;
 	struct socket *sock;
 	struct sockaddr_in *addr;
-};*/
+};
 
 
-int connect_to_ip(struct parties *person)
+struct con_infos *connect_to_ip(unsigned long address,int name)
 {
 	int err;
-	//struct socket *sock_send;
-        //struct sockaddr_in addr_send;
-	//struct con_infos *infos=kmalloc(sizeof(struct con_infos), GFP_KERNEL);
-	if((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &(person->sock))) < 0 )
+	struct socket *sock_send;
+        struct sockaddr_in addr_send;
+	struct con_infos *infos=kmalloc(sizeof(struct con_infos), GFP_KERNEL);
+	if((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock_send)) < 0 )
 	{
                 printk(KERN_INFO": could not create socket for new person %d\n", -ENXIO);
-                return -1;
+                return NULL;
         }
-	memset(person->addr, 0, sizeof(struct sockaddr));
-	person->addr->sin_family = AF_INET;
-	person->addr->sin_addr.s_addr = htonl(create_address(person->ip));
-	person->addr->sin_port = htons(person->listening_port);	
-	if(( err = person->sock->ops->connect(person->sock, (struct sockaddr *)(person->addr), sizeof(struct sockaddr), 0) )< 0 )
+	memset(&addr_send, 0, sizeof(struct sockaddr));
+	addr_send.sin_family = AF_INET;
+	addr_send.sin_addr.s_addr = address;
+	addr_send.sin_port = htons(DEFAULT_PORT);	
+	if(( err = sock_send->ops->connect(sock_send, (struct sockaddr *)&addr_send, sizeof(struct sockaddr), 0) )< 0 )
 	{
 	        printk(KERN_INFO": Could not connect to IP,err:%d\n", -err);
                 goto close_and_out;
 	}
-	printk("added person,%s\n",person->name);
-	return 0;
+	infos->sock=sock_send;
+	infos->addr=&addr_send;
+	infos->ip=address;
+	infos->name_num=name;
+	printk("added person,%ld\n",infos->ip);
+	return infos;
 close_and_out:
-        sock_release(person->sock);
-        person->sock = NULL;
-	return -1;
+        sock_release(sock_send);
+        sock_send = NULL;
+	return NULL;
 }
-/*int get_id_of_ip(unsigned long address)
+int get_id_of_ip(unsigned long address)
 {
 	int i;
 	for(i=0;i<max_con;++i)
@@ -348,7 +337,7 @@ int get_empty_id(void)
 		if(regist[i]==NULL)
 			return i;
 	return max_con;
-}*/
+}
 
 
 int ksocket_send(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len)
@@ -446,7 +435,20 @@ int ksocket_receive(struct socket* sock, struct sockaddr_in* addr, unsigned char
 
 struct socket *conn_socket = NULL;
 
+u32 create_address(u8 *ip)
+{
+        u32 addr = 0;
+        int i;
 
+        for(i=0; i<4; i++)
+        {
+                addr += ip[i];
+                if(i==3)
+                        break;
+                addr <<= 8;
+        }
+        return addr;
+}
 
 int tcp_client_send(struct socket *sock, const char *buf, const size_t length,unsigned long flags)
 {
@@ -814,7 +816,6 @@ typedef struct {
 typedef struct {
 	char name[100];
 	uint16_t app_id;
-	int prot_id;
 	int state;
 	int priority;
 	command **code;
@@ -920,17 +921,13 @@ int perform_cmd(OS *self)
 			comH.send_name=MY_ID;
 			comH.send_id=prog->app_id;
 			
-			//id=get_id_of_dev_id(cur.first);
-			id=cur.second;
+			id=get_id_of_dev_id(cur.first);
 			if(id<0)
 				printk("could not find the person\n");
-			comH.recv_name=cur.second;
+			comH.recv_name=regist[id]->name_num;
 			comH.recv_id=cur.third;
-			comH.identifier=prog->prot_id;
-			comH.ms=prog->codevar[cur.first];
-			if(np[id].sock==NULL)
-				connect_to_ip(&np[id]);
-			ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+			comH.ms=prog->codevar[cur.second];
+			ksocket_send(regist[id]->sock, regist[id]->addr, comH.str, sizeof(comH.str));
 		}
 	cqcH.version = 0;
 	cqcH.app_id = prog->app_id;
@@ -1005,7 +1002,7 @@ int perform_cmd(OS *self)
 			xtra.remote_node=saddr.sin_addr.s_addr;
 			xtra.remote_node=2130706433;
 			//xtra.remote_port=htons(8820+cur.second);
-			xtra.remote_port=np[cur.second].cqc_port;
+			xtra.remote_port=8820+cur.second;
 			xtra.remote_app_id=cur.third;
 			printk("trying to send cmd:%d,ip:%d,port:%d\n",cur.task,xtra.remote_node,xtra.remote_port);
 			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
@@ -1146,21 +1143,6 @@ int OS_find_appid(OS *self,uint16_t app_id)
 		if(self->used_s[i])
 		{
 			if (self->Sleeping[i]->app_id==app_id)
-				return i;
-		}
-	}
-	return -1;
-}
-int OS_find_prot(OS *self,int prot_id)
-{
-	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	int i;
-	//printk("try to find app_id %d",app_id);
-	for(i=0; i< max_prog;++i)
-	{
-		if(self->used_s[i])
-		{
-			if (self->Sleeping[i]->prot_id==prot_id)
 				return i;
 		}
 	}
@@ -1370,60 +1352,18 @@ int cqc_response(OS *self)
 
 
 
-OS my_os;
 
 
 
 
 
 
-typedef struct {
-char ip[4];
-int name;
-}person;
 
 
 
-union Get_prog{
-	struct{
-		char name[100];
-		int np;
-		int prio;
-		int size;
-		int res_size;
-		int max_q;
-		int prot_id;
-		person peop[10];
-		command cmds[400];
-		}__attribute__((__packed__));
-	char str[100+4+4+400*16+4];
-	};
-Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
-{
-	int i;
-	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
-	new_prog->code=kmalloc(sizeof(command *)  *  prog_input->size,GFP_KERNEL);
-	new_prog->output_size=prog_input->res_size;
-	new_prog->codevar=kmalloc(sizeof(int)*new_prog->output_size,GFP_KERNEL);
-	for(i=0;i< new_prog->output_size;++i)
-		new_prog->codevar[i]=0;
-	strcpy(new_prog->name,prog_input->name);
-	new_prog->priority=prog_input->prio;
-	new_prog->size=prog_input->size;
-	new_prog->cur=0;
-	new_prog->app_id=app_id;
-	new_prog->status=1;
-	for(i=0;i<prog_input->size;++i)
-		new_prog->code[i]=&(prog_input->cmds[i]);
-	return new_prog;
-}
-int str_rep( char *into,const char *from,int len)
-{
-	int i;
-	for(i=0; i<len;++i)
-		into[i]=from[i];
-	return 0;
-}
+
+
+
 
 
 
@@ -1434,8 +1374,6 @@ int str_rep( char *into,const char *from,int len)
 #define com_ping 		2
 #define com_ping_return		3
 #define com_message		4
-
-#define com_send_prot		1001
 
 #define com_start_prot		10
 #define com_send_int		11
@@ -1453,43 +1391,28 @@ int classical_recv(OS *self)
 	//printk("smth was recv%d\n ",size);
 	if(size>0)
 		{
-		//id=get_id_of_ip(addr.sin_addr.s_addr);
-		id=comH.send_name;
-		/*if(id==-1)
+		id=get_id_of_ip(addr.sin_addr.s_addr);
+		if(id==-1)
 			{
 			id=get_empty_id();
-			printk("gotten new id%d. This should not happen I guess\n",id);
-			//regist[id]=connect_to_ip(addr.sin_addr.s_addr,comH.send_name);
+			printk("gotten new id%d\n",id);
+			regist[id]=connect_to_ip(addr.sin_addr.s_addr,comH.send_name);
 			}
-		printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);*/
+		printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);
 
 		printk("data: version %d,prog_id %d, cmd %d, identifier: %lld,ms: %lld\n",comH.version,comH.recv_id,comH.type,comH.identifier,comH.ms);
-		/*if( comH.send_name!=regist[id]->name_num)
+		if( comH.send_name!=regist[id]->name_num)
 			{
 			printk("name does not fit or is new. change %d to %d",regist[id]->name_num,comH.send_name);
 			regist[id]->name_num=comH.send_name;
-			}*/
+			}
 		if(comH.type==com_send_int)
 			{
-			res=OS_find_prot(self,comH.identifier);
+			res=OS_find_appid(self,comH.recv_id);
 			if(self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first!=comH.send_name)
 				printk("The id of the programs do not match. Try to continue however: %d,%d\n",self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first ,comH.send_name);
 			self->Sleeping[res]->codevar[self->Sleeping[res]->code[self->Sleeping[res]->cur -1]->second]=comH.ms;
 			OS_wakeup_p(self,res);
-			}
-		if(comH.type==com_send_prot)
-			{
-			Progs *new_prog;
-			union Get_prog *prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
-			
-			size = ksocket_receive(sock, &addr, prog_shell->str, sizeof(prog_shell->str));
-			//str_rep(prog_shell->str,buffer,len); 
-			printk("shell prio:%d\n",prog_shell->prio);
-			new_prog=create_prog(prog_shell,3000+numberOpens);
-			//kfree(prog_shell);
-			printk("new prog,%p \n",new_prog);
-			printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
-			OS_insert_p(&my_os,new_prog);
 			}
 		return 1;
 		}
@@ -1511,7 +1434,7 @@ command my_c1;
 command my_c2;
 command my_c3;
 Progs p;
-
+OS my_os;
 int prog_id;
 //char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
@@ -1530,10 +1453,10 @@ int looping(void)
 	run=socket_open();
 	printk("sock_con res:%d\n",run);
 	regist=kmalloc(sizeof(struct con_infos *)*max_con, GFP_KERNEL);
-	/*for(run=0; run<max_con;++run)
+	for(run=0; run<max_con;++run)
 		regist[run]=NULL;
 	regist[0]=connect_to_ip(htonl(create_address(ip)),ip[3]);
-	*/
+	
 	run=0;
 	for(lauf=0;lauf<20*20*50+(1-waiting)*10000000;++lauf)
 	{
@@ -1545,7 +1468,7 @@ int looping(void)
 		if(lauf %(40 +(1-waiting)*100000) == 0) 
 			{
 			printk("starting round %d,it is in: NS %d%d%d%d , RUN %d%d%d%d , SL %d%d%d%d \n",lauf,my_os.used_n[0],my_os.used_n[1],my_os.used_n[2],my_os.used_n[3],my_os.used_r[0],my_os.used_r[1],my_os.used_r[2],my_os.used_r[3],my_os.used_s[0],my_os.used_s[1],my_os.used_s[2],my_os.used_s[3]);
-			//print_con();
+			print_con();
 			}
 	   	if(OS_run_p(&my_os)<0)
 			{
@@ -1823,26 +1746,48 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param len The length of the array of data that is being passed in the const char buffer
  *  @param offset The offset if required
  */
-int send_prog(int id,union Get_prog *shell)
-	{
-	comHeader comH;
-	printk("sending classical infos\n");
-	comH.version=5;
-	comH.send_name=MY_ID;
-	comH.send_id=-1;
-			
-	//id=get_id_of_dev_id(cur.first);
-	if(id<0)
-		printk("could not find the person\n");
-	comH.recv_name=id;
-	comH.recv_id=-1;
-	if(np[id].sock==NULL)
-		connect_to_ip(&np[id]);
-	ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
-	ksocket_send(np[id].sock, np[id].addr, shell->str, sizeof(shell->str));
+typedef struct {
+char ip[4];
+int name;
+}person;
+union Get_prog{
+	struct{
+		char name[100];
+		int prio;
+		int size;
+		int res_size;
+		int max_q;
+		person peop[10];
+		command cmds[400];
+		}__attribute__((__packed__));
+	char str[100+4+4+400*16];
+	};
+Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
+{
+	int i;
+	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
+	new_prog->code=kmalloc(sizeof(command *)  *  prog_input->size,GFP_KERNEL);
+	new_prog->output_size=prog_input->res_size;
+	new_prog->codevar=kmalloc(sizeof(int)*new_prog->output_size,GFP_KERNEL);
+	for(i=0;i< new_prog->output_size;++i)
+		new_prog->codevar[i]=0;
+	strcpy(new_prog->name,prog_input->name);
+	new_prog->priority=prog_input->prio;
+	new_prog->size=prog_input->size;
+	new_prog->cur=0;
+	new_prog->app_id=app_id;
+	new_prog->status=1;
+	for(i=0;i<prog_input->size;++i)
+		new_prog->code[i]=&(prog_input->cmds[i]);
+	return new_prog;
+}
+int str_rep( char *into,const char *from,int len)
+{
+	int i;
+	for(i=0; i<len;++i)
+		into[i]=from[i];
 	return 0;
-	}
-
+}
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
   
    union Get_prog *prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
@@ -1851,8 +1796,6 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    printk("Node number:%d\n",pos);
    
    str_rep(prog_shell->str,buffer,len); 
-   if(prog_shell->np!=MY_ID)
-	
    printk("shell prio:%d\n",prog_shell->prio);
    new_prog=create_prog(prog_shell,300+numberOpens);
    prog_ids[pos]=new_prog;

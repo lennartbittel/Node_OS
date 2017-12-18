@@ -4,6 +4,7 @@
 #include<errno.h>
 #include<fcntl.h>
 #include<time.h>
+#include <math.h>
 #define cmd_identity		0	/* Identity (do nothing, wait one step) */
 #define	cmd_new_qubit		1	/* Ask for a new qubit */
 #define cmd_meas_rm		2	/* Measure qubit */
@@ -18,8 +19,10 @@
 #define cmd_ygate		12	/* Pauli Y */
 #define cmd_tgate		13	/* T Gate */
 #define cmd_xrot		14	/* Rotation over angle around X in pi/256 increments */
-#define cmd_yrot		15	/* Rotation over angle around Y in pi/256 increments */
-#define cmd_zrot		16	/* Rotation over angle around Z in pi/256 increments */
+//This is the wrong way. But also in CQC!!
+#define cmd_zrot		15	/* Rotation over angle around Y in pi/256 increments */
+#define cmd_yrot		16	/* Rotation over angle around Z in pi/256 increments */
+//end wrong
 #define cmd_hgate		17	/* Hadamard Gate */
 #define cmd_kgate		18	/* K Gate - taking computational to Y eigenbasis */
 
@@ -126,10 +129,12 @@ typedef struct {
 	union {
 		struct{
 			char name[100];
+			int np;
 			int prio;
 			int cur;
 			int icr;
 			int max_q;
+			int prot_id;
 			person peop[10];
 			ops operations[400];
 		}__attribute__((__packed__));
@@ -146,11 +151,13 @@ int find_item(void **lis,void *item,int len)
 	return -1;
 }
 
-int init_sys(qsys *self)
+int init_sys(qsys *self,int np)
 {
 	self->c_res=malloc(sizeof(int *)*100);
 	//self->q_var=malloc(sizeof(int *)*10);
 	//self->peop=malloc(sizeof(person *)*10);
+	self->prot_id=rand();
+	self->np=np;
 	self->cur=0;
 	self->icr=0;
 	self->val=0;
@@ -175,6 +182,14 @@ int apply_gate(qsys *self,int task,int qubit)
 	self->operations[self->cur].first=qubit;
 	return self->operations[(self->cur)++].first;
 }
+int apply_rgate(qsys *self,int task,int qubit,int angle)
+{
+	//self->operations[self->cur]=malloc(sizeof(ops));
+	self->operations[self->cur].task=task;
+	self->operations[self->cur].first=qubit;
+	self->operations[self->cur].second=angle;
+	return self->operations[(self->cur)++].first;
+}
 int apply_2gate(qsys *self,int task,int qubit1,int qubit2)
 {
 	//self->operations[self->cur]=malloc(sizeof(ops));
@@ -182,6 +197,34 @@ int apply_2gate(qsys *self,int task,int qubit1,int qubit2)
 	self->operations[self->cur].first=qubit1;
 	self->operations[self->cur].second=qubit2;
 	return self->operations[(self->cur)++].first;
+}
+int apply_cpgate(qsys *self,int qubit1,int qubit2,int angle)
+{
+	apply_rgate(self,cmd_zrot,qubit1,angle/2);
+	apply_2gate(self,cmd_cphase,qubit1,qubit2);
+	apply_rgate(self,cmd_zrot,qubit1,256-angle/2);
+	//self->operations[self->cur]=malloc(sizeof(ops));
+	return 0;
+}
+int send_q(qsys *self,int qubit,int person)
+{
+	//self->operations[self->cur]=malloc(sizeof(ops));
+	self->operations[self->cur].task=cmd_sendq;
+	self->operations[self->cur].first=qubit;
+	self->operations[self->cur].second=person;
+	remove_q(&(self->val),qubit);
+	return self->operations[(self->cur)++].first;
+}
+int recv_q(qsys *self,int person)
+{
+	//self->operations[self->cur]=malloc(sizeof(ops));
+	int i=put_q(&(self->val));
+	if((i+1)>self->max_q)
+		self->max_q=i+1;
+	self->operations[self->cur].task=cmd_recvq;
+	self->operations[self->cur].first=i;
+	self->operations[self->cur].second=person;
+	return i;
 }
 int meas_q(qsys *self,int qubit,int *resval,int rem)
 {
@@ -194,6 +237,7 @@ int meas_q(qsys *self,int qubit,int *resval,int rem)
 		remove_q(&(self->val),qubit);
 	return self->operations[(self->cur)++].first;
 }
+
 union return_msg {
 struct	{
 	int type;
@@ -203,12 +247,14 @@ char str[200*4+4];
 };
 int perform_sys(qsys *self,int prio)
 {
+	struct timeval time;
 	if(self->val)
 		printf("ERR: there are qubits which are still in use\n");
+	printf("amount of steps:%d,amount of final vals:%d,max_qubits:%d\n",self->cur,self->icr,self->max_q);
 	for(int i=0;i< self->cur; ++i)
 		{
-		printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
-	printf("amount of steps:%d,amount of final vals:%d,max_qubits:%d\n",self->cur,self->icr,self->max_q);
+		//printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
+	
 		}
 	self->prio=prio;
 	self->operations[(self->cur)++].task=cmd_done;
@@ -220,15 +266,16 @@ int perform_sys(qsys *self,int prio)
       		perror("Failed to open the device...");
       		return errno;
 		}
+	gettimeofday( &time, 0 );
 	ret = write(fd, self->str, sizeof(self->str));
 	if (ret < 0){
       		perror("Failed to write the message to the device.");
       		return errno;
 		}
+	long start_t = 1000000 * time.tv_sec + time.tv_usec;
 	while(1)
 	{
 		sleep(1);
-		printf("sleeping over\n");
 		union return_msg ms;
 	
 		ret = read(fd, ms.str, sizeof(ms.str));  
@@ -241,6 +288,9 @@ int perform_sys(qsys *self,int prio)
 			printf("still running: %d/%d \n",ms.results[0],ms.results[1]);
 		if (ms.type==1)
 			{
+			gettimeofday( &time, 0 );
+  	 		long end_t = 1000000 * time.tv_sec + time.tv_usec;
+			printf("program was executed. Runtime: %lds ,%ld ms\n",(end_t-start_t)/1000000,((end_t-start_t)/1000)%1000);
 			for(int i=0;i< self->icr; ++i)
 				*(self->c_res[i])=ms.results[i];
 			return 0;
@@ -248,9 +298,119 @@ int perform_sys(qsys *self,int prio)
 	}
 
 }
+
+int qft(qsys *self,int *q,int n)
+{
+	
+	
+
+	for(int i=0;i<n;++i)
+		{
+		apply_gate(self,cmd_hgate,q[i]);	
+		for(int j=i+1;j<n;++j)
+			apply_cpgate(self,q[i],q[j],256/(1<<(j-i+1)));
+		}
+
+
+}
+int shor(int number,int n)
+{
+	printf("start\n");
+	for(int m=0;m<5;++m)
+	{
+		//int n=4;
+		int q[n];
+		int res[n];
+		qsys sys;
+		init_sys(&sys,1);
+		int qf=create_q(&sys);
+		apply_gate(&sys,cmd_xgate,qf);
+		for(int i=0; i<n;++i)
+			{
+			q[i]=create_q(&sys);
+			apply_gate(&sys,cmd_hgate,q[i]);	
+			apply_cpgate(&sys,qf,q[i],((256/number)<<i)%256);
+			}
+		int a=rand()%(number);
+		printf("chosen a:%d\n",a);
+		qft(&sys,q,n);
+		for(int i=0; i<n;++i)
+			{
+			meas_q(&sys,q[i],&res[i],remove);
+			}
+		int result;
+		int qfr;
+		meas_q(&sys,qf,&qfr,remove);
+		result=perform_sys(&sys,10);
+		for(int k=0;k<n;++k)
+			printf("%d, ",res[k]);
+		printf("done,%d\n",qfr);
+	}
+}
+/*int test_cphase(int angle)
+{
+	int rep=15;
+	int res[1000];
+	qsys sys;
+	init_sys(&sys);
+	for(int k=0; k<rep;++k)
+	{
+		int q1= create_q(&sys);
+		int q2= create_q(&sys);
+		apply_gate(&sys,cmd_xgate,q1);	
+		apply_gate(&sys,cmd_xgate,q2);
+		apply_rgate(&sys,cmd_yrot,q1,128);
+		//apply_cpgate(&sys,q1,q2,angle);
+		//printf("qubit id: %d\n",q1);
+		//printBits(8,&(sys.val));
+		//apply_gate(&sys,cmd_hgate,q2);
+		meas_q(&sys,q1,&res[2*k],remove);
+		meas_q(&sys,q2,&res[2*k+1],remove);
+		
+	}
+	int result;
+	result=perform_sys(&sys,10);
+	for(int k=0;k<rep;++k)
+		printf("res: %d,%d",res[2*k],res[2*k+1]);
+	printf("done\n");
+	return 0;
+}*/
 int main()
 {
 	srand(time(NULL));
+	qsys sys;
+	init_sys(&sys,1);
+	int q=create_q(&sys);
+	//send_q(&sys,q,1);
+	//int qr=recv_q(&sys,1);
+	int res;
+	meas_q(&sys,q,&res,remove);
+	int result=perform_sys(&sys,10);
+	printf("result:%d\n",res);
+	//shor(15,9);
+/*
+	printf("start\n");
+	int n=4;
+	int q[n];
+	int res[n];
+	qsys sys;
+	init_sys(&sys);
+	for(int i=0; i<n;++i)
+		{
+		q[i]=create_q(&sys);
+		}
+	qft(&sys,q,n);
+	for(int i=0; i<n;++i)
+		{
+		meas_q(&sys,q[i],&res[i],remove);
+		}
+	int result;
+	result=perform_sys(&sys,10);
+	for(int k=0;k<n;++k)
+		printf("%d, ",res[k]);
+	printf("done\n");*/
+/*
+	
 	printf("start:%ld\n",sizeof(unsigned long long));
 
 
@@ -268,24 +428,13 @@ int main()
 	for(int k=0; k<27;++k)
 	{
 		int q1= create_q(&sys);
-		printf("qubit id: %d\n",q1);
-		printBits(8,&(sys.val));
+		//printf("qubit id: %d\n",q1);
+		//printBits(8,&(sys.val));
 		apply_gate(&sys,cmd_hgate,q1);
 		meas_q(&sys,q1,&res[k],remove);
 		
 	}
-/*	for(int lauf=0;lauf<rep;++lauf)
-	{
-		int * q1= create_q(sys);
-		int * q2= create_q(sys);
-		apply_gate(sys,H,q1);
-		apply_2gate(sys,CNOT,q1,q2);
-		send_q(sys,q2,bob);
-		if(sys,basis[lauf])
-			apply_gate(sys,q1,H);
-		meas_q(sys,q1,&res[rep],remove);		
-	}
-*/
+
 	int result;
 	result=perform_sys(&sys,10);
 	printf("res:%d\n",result);
@@ -300,6 +449,6 @@ int main()
 	int *nums=get_num(49,6,(num/9)%binom(49,6));
 	for(int k=0; k<6;++k)
 		printf("%d, ",nums[k]);
-	printf("special: %d\n",num%9+1);
+	printf("special: %d\n",num%9+1);*/
 	return 0;
 }
