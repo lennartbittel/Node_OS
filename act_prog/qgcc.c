@@ -151,12 +151,12 @@ int find_item(void **lis,void *item,int len)
 	return -1;
 }
 
-int init_sys(qsys *self,int np)
+int init_sys(qsys *self,int np,int prot_id)
 {
 	self->c_res=malloc(sizeof(int *)*100);
 	//self->q_var=malloc(sizeof(int *)*10);
 	//self->peop=malloc(sizeof(person *)*10);
-	self->prot_id=rand();
+	self->prot_id=prot_id;
 	self->np=np;
 	self->cur=0;
 	self->icr=0;
@@ -212,6 +212,7 @@ int send_q(qsys *self,int qubit,int person)
 	self->operations[self->cur].task=cmd_sendq;
 	self->operations[self->cur].first=qubit;
 	self->operations[self->cur].second=person;
+	self->operations[self->cur].third=304;
 	remove_q(&(self->val),qubit);
 	return self->operations[(self->cur)++].first;
 }
@@ -224,6 +225,7 @@ int recv_q(qsys *self,int person)
 	self->operations[self->cur].task=cmd_recvq;
 	self->operations[self->cur].first=i;
 	self->operations[self->cur].second=person;
+	(self->cur)++;
 	return i;
 }
 int meas_q(qsys *self,int qubit,int *resval,int rem)
@@ -245,7 +247,7 @@ struct	{
 	};
 char str[200*4+4];
 };
-int perform_sys(qsys *self,int prio)
+int perform_sys(qsys *self,int prio,int get_return)
 {
 	struct timeval time;
 	if(self->val)
@@ -253,7 +255,7 @@ int perform_sys(qsys *self,int prio)
 	printf("amount of steps:%d,amount of final vals:%d,max_qubits:%d\n",self->cur,self->icr,self->max_q);
 	for(int i=0;i< self->cur; ++i)
 		{
-		//printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
+		printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
 	
 		}
 	self->prio=prio;
@@ -273,7 +275,7 @@ int perform_sys(qsys *self,int prio)
       		return errno;
 		}
 	long start_t = 1000000 * time.tv_sec + time.tv_usec;
-	while(1)
+	while(get_return)
 	{
 		sleep(1);
 		union return_msg ms;
@@ -322,7 +324,7 @@ int shor(int number,int n)
 		int q[n];
 		int res[n];
 		qsys sys;
-		init_sys(&sys,1);
+		init_sys(&sys,1,313);
 		int qf=create_q(&sys);
 		apply_gate(&sys,cmd_xgate,qf);
 		for(int i=0; i<n;++i)
@@ -341,7 +343,7 @@ int shor(int number,int n)
 		int result;
 		int qfr;
 		meas_q(&sys,qf,&qfr,remove);
-		result=perform_sys(&sys,10);
+		result=perform_sys(&sys,10,0);
 		for(int k=0;k<n;++k)
 			printf("%d, ",res[k]);
 		printf("done,%d\n",qfr);
@@ -378,15 +380,29 @@ int shor(int number,int n)
 int main()
 {
 	srand(time(NULL));
+	unsigned int a=rand()%10000;
+	a=393;
+	
 	qsys sys;
-	init_sys(&sys,1);
+	init_sys(&sys,1,a);
 	int q=create_q(&sys);
 	//send_q(&sys,q,1);
 	//int qr=recv_q(&sys,1);
 	int res;
-	meas_q(&sys,q,&res,remove);
-	int result=perform_sys(&sys,10);
+	send_q(&sys,q,0);
+	int result=perform_sys(&sys,10,0);
+
+	sleep(2);
+ 	if(0)
+{
+	init_sys(&sys,0,a);
+	int qa=recv_q(&sys,1);
+	//send_q(&sys,q,1);
+	//int qr=recv_q(&sys,1);
+	apply_gate(&sys,cmd_hgate,qa);
+	result=perform_sys(&sys,10,1);
 	printf("result:%d\n",res);
+}
 	//shor(15,9);
 /*
 	printf("start\n");

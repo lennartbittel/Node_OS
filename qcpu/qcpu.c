@@ -30,7 +30,7 @@
 //#include "cqc.h"
 #include <linux/sched.h>   //wake_up_process()
 #include <linux/kthread.h> //kthread_create(), kthread_run()
-#define MY_ID 1 //0 to 4
+#define MY_ID 0 //0 to 4
 #define PORT 8821+MY_ID
 #define DEFAULT_PORT 8850
 
@@ -279,9 +279,11 @@ out:
 int connect_to_ip(struct parties *person)
 {
 	int err;
+	person->addr=kmalloc(sizeof(struct sockaddr_in),GFP_KERNEL);
 	//struct socket *sock_send;
         //struct sockaddr_in addr_send;
 	//struct con_infos *infos=kmalloc(sizeof(struct con_infos), GFP_KERNEL);
+	printk("trying to connect to %s\n",person->name);
 	if((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &(person->sock))) < 0 )
 	{
                 printk(KERN_INFO": could not create socket for new person %d\n", -ENXIO);
@@ -505,8 +507,8 @@ int tcp_client_receive(struct socket *sock, char *str,unsigned long flags,int ma
 
         return len;
 }
-//unsigned char destip[5] = {192,168,1,1 ,'\0'};
-unsigned char destip[5] = {131,180,82,194 ,'\0'};
+unsigned char destip[5] = {192,168,1,1 ,'\0'};
+//unsigned char destip[5] = {131,180,82,194 ,'\0'};
 struct sockaddr_in saddr;
 int tcp_client_connect(void)
 {
@@ -814,6 +816,7 @@ typedef struct {
 typedef struct {
 	char name[100];
 	uint16_t app_id;
+	int direct_input;
 	int prot_id;
 	int state;
 	int priority;
@@ -881,9 +884,12 @@ int perform_cmd(OS *self)
 		return -1;
 		}
 	prog=self->Running[index];
-	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d with commands: %d,%d,%d",prog->name,prog->app_id,prog->cur,prog->code[prog->cur]->task,prog->code[prog->cur]->first,prog->code[prog->cur]->second);
+	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d/%d with commands: %d,%d,%d",prog->name,prog->app_id,prog->cur,prog->size,prog->code[prog->cur]->task,prog->code[prog->cur]->first,prog->code[prog->cur]->second);
 	if (prog->cur >= prog->size)
+		{
+		printk("in unwanted areas\n");
 		return -3;
+		}
 	cur=*(prog->code[prog->cur]);
 	//printk(KERN_INFO "Taks started:%d, %d\n",prog->cur,cur.task);
 	//cqc_task
@@ -899,7 +905,8 @@ int perform_cmd(OS *self)
 		prog->cur=cur.first;
 	else if (cur.task==cmd_done)
 		{
-			printk(KERN_INFO "Task %s is finished, the results are: %d,%d",prog->name, prog->codevar[0],prog->codevar[1]);
+			printk("task is done\n");
+			//printk(KERN_INFO "Task %s is finished, the results are: %d,%d\n",prog->name, prog->codevar[0],prog->codevar[1]);
 			prog->status=2;
 			OS_sleep_p(self,index);
 			
@@ -925,12 +932,15 @@ int perform_cmd(OS *self)
 			if(id<0)
 				printk("could not find the person\n");
 			comH.recv_name=cur.second;
-			comH.recv_id=cur.third;
+			comH.recv_id=cur.second;
 			comH.identifier=prog->prot_id;
 			comH.ms=prog->codevar[cur.first];
 			if(np[id].sock==NULL)
 				connect_to_ip(&np[id]);
 			ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+			OS_sleep_p(self,index);
+			++(prog->cur);
+			return 0;
 		}
 	cqcH.version = 0;
 	cqcH.app_id = prog->app_id;
@@ -1006,7 +1016,7 @@ int perform_cmd(OS *self)
 			xtra.remote_node=2130706433;
 			//xtra.remote_port=htons(8820+cur.second);
 			xtra.remote_port=np[cur.second].cqc_port;
-			xtra.remote_app_id=cur.third;
+			xtra.remote_app_id=prog->app_id;
 			printk("trying to send cmd:%d,ip:%d,port:%d\n",cur.task,xtra.remote_node,xtra.remote_port);
 			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
 			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
@@ -1316,7 +1326,7 @@ int cqc_response(OS *self)
 		//printk(KERN_INFO "No message recv\n");
 		return -1;
 		}
-	//printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d\n",res,cqcH_ret.version,cqcH_ret.type,cqcH_ret.app_id,cqcH_ret.length);
+	printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d\n",res,cqcH_ret.version,cqcH_ret.type,cqcH_ret.app_id,cqcH_ret.length);
 	if(cqcH_ret.length>0)
 	{
 		//msleep(200);
@@ -1326,7 +1336,7 @@ int cqc_response(OS *self)
 	}
 	//printk(KERN_INFO "TRY TO FIND THE ID\n");
 	res=OS_find_appid(self,cqcH_ret.app_id);
-	//printk(KERN_INFO " Found prog %d for id %d",res,cqcH_ret.app_id);
+	printk(KERN_INFO " Found prog %d for id %d",res,cqcH_ret.app_id);
 
 	if(cqcH_ret.type==CQC_TP_HELLO) //just a simple ping 
 		{
@@ -1435,7 +1445,7 @@ int str_rep( char *into,const char *from,int len)
 #define com_ping_return		3
 #define com_message		4
 
-#define com_send_prot		1001
+#define com_send_prot		101
 
 #define com_start_prot		10
 #define com_send_int		11
@@ -1485,7 +1495,8 @@ int classical_recv(OS *self)
 			size = ksocket_receive(sock, &addr, prog_shell->str, sizeof(prog_shell->str));
 			//str_rep(prog_shell->str,buffer,len); 
 			printk("shell prio:%d\n",prog_shell->prio);
-			new_prog=create_prog(prog_shell,3000+numberOpens);
+			new_prog=create_prog(prog_shell,prog_shell->prot_id);
+			new_prog->direct_input=0;
 			//kfree(prog_shell);
 			printk("new prog,%p \n",new_prog);
 			printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
@@ -1825,21 +1836,27 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  */
 int send_prog(int id,union Get_prog *shell)
 	{
+	int res;
 	comHeader comH;
-	printk("sending classical infos\n");
+	printk("sending classical infos,%d\n",id);
 	comH.version=5;
 	comH.send_name=MY_ID;
 	comH.send_id=-1;
-			
+	comH.type=com_send_prot;		
 	//id=get_id_of_dev_id(cur.first);
 	if(id<0)
 		printk("could not find the person\n");
 	comH.recv_name=id;
 	comH.recv_id=-1;
 	if(np[id].sock==NULL)
-		connect_to_ip(&np[id]);
-	ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+		{
+		res=connect_to_ip(&np[id]);
+		printk("res: %d,sock:%p,addr:%p\n",res,np[id].sock,np[id].addr);
+		}
+	res=ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+	printk("send_res:%d\n",res);
 	ksocket_send(np[id].sock, np[id].addr, shell->str, sizeof(shell->str));
+	printk("send_res:%d\n",res);
 	return 0;
 	}
 
@@ -1852,9 +1869,13 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    
    str_rep(prog_shell->str,buffer,len); 
    if(prog_shell->np!=MY_ID)
-	
+	{
+	send_prog(prog_shell->np,prog_shell);
+	return  0;
+	}
    printk("shell prio:%d\n",prog_shell->prio);
-   new_prog=create_prog(prog_shell,300+numberOpens);
+   new_prog=create_prog(prog_shell,prog_shell->prot_id);
+   new_prog->direct_input=1;
    prog_ids[pos]=new_prog;
    //kfree(prog_shell);
    printk("new prog,%p \n",new_prog);
