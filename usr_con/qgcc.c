@@ -1,10 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include<unistd.h>
+#include <unistd.h>
 #include<errno.h>
 #include<fcntl.h>
 #include<time.h>
 #include <math.h>
+#include<sys/ioctl.h>
+
+
+
+
+
 #define cmd_identity		0	/* Identity (do nothing, wait one step) */
 #define	cmd_new_qubit		1	/* Ask for a new qubit */
 #define cmd_meas_rm		2	/* Measure qubit */
@@ -316,12 +322,52 @@ int perform_sys(qsys *self,int prio,int get_return)
 	}
 
 }
-
+int load_prog(qsys *self,int prio)
+{
+	if(self->val)
+		printf("ERR: there are qubits which are still in use\n");
+	printf("amount of steps:%d,amount of final vals:%d,max_qubits:%d\n",self->cur,self->icr,self->max_q);
+	for(int i=0;i< self->cur; ++i)
+		{
+		printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
+	
+		}
+	self->prio=prio;
+	self->operations[(self->cur)++].task=cmd_done;
+	
+	int fd,ret;
+	fd = open("/dev/nodeos", O_RDWR);
+	ioctl(fd, self->prot_id*10+1, (int32_t*) &self->str); 
+	if (ret < 0){
+      		perror("Failed to write the message to the device.");
+      		return errno;
+		}
+}
+int get_status(qsys *self,int app_id)
+{	
+		union return_msg ms;
+		int fd,ret;
+		fd = open("/dev/nodeos", O_RDWR);
+		ret = ioctl(fd, app_id*10+2, (int32_t*) &ms.str);  
+		if(ret<0)
+			{
+			printf("ms was not rec");
+			return -1;
+			}
+		printf("ms:%d\n",ms.type);
+		if(ms.type==0)
+			printf("still running: %d/%d \n",ms.results[0],ms.results[1]);
+			return 1;
+		if (ms.type==1)
+			{
+			printf("program was executed. \n");
+			for(int i=0;i< self->icr; ++i)
+				*(self->c_res[i])=ms.results[i];
+			return 0;
+			}
+}
 int qft(qsys *self,int *q,int n)
 {
-	
-	
-
 	for(int i=0;i<n;++i)
 		{
 		apply_gate(self,cmd_hgate,q[i]);	
@@ -435,7 +481,7 @@ int main()
 {
 	qsys sysA;
 	srand(time(NULL));
-	int alice=0;
+	int i,alice=0;
 	init_sys(&sysA,alice,rand()%1000);
 	int res[27];
 	
@@ -448,8 +494,14 @@ int main()
 		
 	}
 
-		int result;
-	result=perform_sys(&sysA,10,1);
+	int result;
+	//result=perform_sys(&sysA,10,1);
+	result=load_prog(&sysA,10);
+	while(get_status(&sysA,sysA.prot_id))
+	{
+		usleep(500*1000);
+		printf("round:%d\n",++i);
+	}
 	printf("res:%d\n",result);
 
 	for(int k=0;k<27;++k)

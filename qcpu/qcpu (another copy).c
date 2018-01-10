@@ -9,6 +9,7 @@
  * this the LKM.
  * @see http://www.derekmolloy.ie/ for a full description and follow-up descriptions.
  */
+
 #include <linux/init.h>           // Macros used to mark up functions e.g. __init __exit
 #include <linux/module.h>         // Core header for loading LKMs into the kernel
 #include <linux/device.h>         // Header to support the kernel Driver Model
@@ -24,7 +25,7 @@
 #include <linux/in.h>
 #include <linux/socket.h>
 #include <linux/slab.h>
-#include <linux/rbtree.h>
+
 
 //#include "cqc.h"
 #include <linux/sched.h>   //wake_up_process()
@@ -72,7 +73,6 @@ static int     dev_open1(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
-static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg);
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
@@ -97,7 +97,7 @@ static struct file_operations fops =
    .open = dev_open1,
    .read = dev_read,
    .write = dev_write,
-   .unlocked_ioctl = dev_ioctl1,
+   .unlocked_ioctl = etx_ioctl,
    .release = dev_release,
 };
 
@@ -162,6 +162,8 @@ typedef union {
 	char str[CQC_NOTIFY_LENGTH];
 } __attribute__((__packed__)) notifyHeader;
 //shit from client
+
+
 
 
 
@@ -595,7 +597,95 @@ err:
 }
 
 #define MAX_CONNS 16
+/*
+int listen_for_new_people(void)
+{
+	int server_err;
+	struct socket *listen_socket;
+        struct sockaddr_in server;
+	allow_signal(SIGKILL|SIGTERM);
+        DECLARE_WAIT_QUEUE_HEAD(wq);
+	server_err = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP,  &listen_socket);
+	if(server_err<0)
+		{
+		printk(KERN_INFO "Could not create listening socket");
+		return -1;
+		}
+	listen_socket->sk->sk_reuse = 1;
+	//server.sin_addr.s_addr = htonl(INADDR_ANY);
+	server.sin_addr.s_addr = INADDR_ANY;
+        server.sin_family = AF_INET;
+        server.sin_port = htons(DEFAULT_PORT);
+	server_err=listen_socket->ops->bind(listen_socket, (struct sockaddr*)&server,sizeof(server));
+	if(server_err<0)
+		{
+		printk(KERN_INFO "Could not bind listening socket");
+		return -1;
+		}
+	server_err = listen_socket->ops->listen(listen_socket, 16);
+		if(server_err<0)
+		{
+		printk(KERN_INFO "Could not listen to listening socket");
+		return -1;
+		}
+	//end of listen, start of accept
+	int accept_err = 0;
+	struct socket *accept_socket = NULL;
+	struct inet_connection_sock *isock; 
+	int id = 0;
+	DECLARE_WAITQUEUE(accept_wait, current);
+	while(1)
+		{
+		struct tcp_conn_handler_data *data = NULL;
+                struct sockaddr_in *client = NULL;
+		char *tmp;
+                int addr_len;
+		accept_err = sock_create(listen_socket->sk->sk_family, listen_socket->type,listen_socket->sk->sk_protocol, &accept_socket);
+		if(accept_err < 0 || !accept_socket)
+			{
+				printk(KERN_INFO "accepting socket not created");
+				return -1;
+			}
+		accept_socket->listen_type = listen_socket->type;
+                accept_socket->listen_ops  = listen_socket->ops;
+		isock = inet_csk(listen_socket->sk);
+		add_wait_queue(&listen_socket->sk->sk_wq->wait, &accept_wait);
+		while(reqsk_queue_empty(&isock->icsk_accept_queue))
+			{
+			__set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(HZ);
+			if(kthread_should_stop())
+		               	{
+		                printk(KERN_INFO "Stopping to listen for new people");
+		                __set_current_state(TASK_RUNNING);
+		                remove_wait_queue(&listen_socket->sk->sk_wq->wait,&accept_wait);
+		                sock_release(accept_socket);
+				sock_release(listen_socket);//from listen
+		                return 0;
+		               }
+			}
+		__set_current_state(TASK_RUNNING);
+		remove_wait_queue(&socket->sk->sk_wq->wait, &accept_wait);
+		accept_err = listen_socket->ops->accept(listen_socket, accept_socket, O_NONBLOCK);
+		if(accept_err < 0 )
+			{
+				printk(KERN_INFO "Could not accept the request");
+				return -1;
+			}
+		client = kmalloc(sizeof(struct sockaddr_in), GFP_KERNEL);   
+                memset(client, 0, sizeof(struct sockaddr_in));
 
+                addr_len = sizeof(struct sockaddr_in);
+
+                accept_err = accept_socket->ops->getname(accept_socket,(struct sockaddr *)client, &addr_len, 2);
+
+
+		}
+
+	sock_release(listen_socket);
+}
+*/
+//communication between people
 
 
 typedef struct
@@ -725,9 +815,7 @@ typedef struct {
 	int third;
 }command;
 typedef struct {
-	struct rb_node __rb_node;
 	char name[100];
-	
 	uint16_t app_id;
 	int direct_input;
 	int prot_id;
@@ -766,112 +854,17 @@ typedef union
 typedef struct
 {
 	
-	struct rb_root *Running;
+	Progs **Running;
 	int used_r[max_prog];
-	struct rb_root *Sleeping;
+	Progs **Sleeping;
 	int used_s[max_prog];
-	struct rb_root *Not_started;
+	Progs **Not_started;
 	int used_n[max_prog];
-	struct rb_root *All_progs;
 	int qubits[amount_qubits];
 	int q_live[amount_qubits];
 	int g_prio[max_prog]; 
 	Progs prog_lis[max_prog];
 }OS;
-
-
-
-
-
-//rb tree--------------------------------------------------------------------------------------
-
-#define BY_PRIO 0
-#define BY_ID   1
-Progs * rb_search_prog( struct rb_root * root , int target ,int type ){
-	
-       struct rb_node * n = root->rb_node;
-       Progs * ans;
-       int lauf;
-       while( n ){
-              //Get the parent struct to obtain the data for comparison
-              	ans = rb_entry( n , Progs, __rb_node );
-	      	if(type==BY_PRIO) 	lauf=ans->priority;
-		if(type==BY_ID)		lauf=ans->app_id;
-		if( target < lauf )
-		 	n = n->rb_left;
-		else if( target > lauf )
-			n = n->rb_right;
-		else
-			return ans;
-
-       }
-       return NULL;
-
-}
-
-Progs * rb_insert_prog( struct rb_root * root , int target , struct rb_node * source,int type ){
-       struct rb_node **p = &root->rb_node;
-       struct rb_node *parent = NULL;
-       Progs * ans;
-	int lauf=0;
-       while( *p ){
-
-              parent = *p;
-              ans = rb_entry( parent , Progs, __rb_node );
-	      	if(type==BY_PRIO) 	lauf=ans->priority;
-		if(type==BY_ID)		lauf=ans->app_id;
-              if( target < lauf )
-                     p = &(*p)->rb_left;
-              else if( (target > lauf)||type==BY_PRIO ) //ID cares about none being equal.
-                     p = &(*p)->rb_right;
-              else
-                     return ans;
-
-       }
-       rb_link_node( source , parent , p );             //Insert this new node as a red leaf.
-       rb_insert_color( source , root );           //Rebalance the tree, finish inserting
-       return NULL;
-
-}
-void rb_erase_unode( struct rb_node * source , struct rb_root * root ){
-
-       Progs * target;
-      
-       target = rb_entry( source , Progs , __rb_node );
-       rb_erase( source , root );                           //Erase the node
-       //kfree( target );                                     //Free the memory
-
-}
-
-int sizeof_tree(struct rb_root *root)
-{
-	struct rb_node *lauf;
-	int i=0;
-	lauf=rb_first(root);
-	while(lauf!=NULL)
-		{
-		lauf=rb_next(lauf);
-		++i;
-		}
-	return i;
-}
-
-
-// end  rb tree-----------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 cqcHeader cqcH;
 cmdHeader cmdH;
 xtraCmdHeader xtra;
@@ -879,16 +872,19 @@ command cur;
 #define CQC_OPT_NOTIFY 		0x01
 #define CQC_OPT_BLOCK           0x04
 
-Progs * OS_next_p(OS *self);
-int OS_sleep_p(OS *self,Progs *prog);
+int OS_next_p(OS *self);
+int OS_sleep_p(OS *self,int prog_num);
 
 int perform_cmd(OS *self)
 {	
-	Progs *prog=OS_next_p(self);
-	if(prog==NULL)
+	Progs *prog;
+	int index=OS_next_p(self);
+	if(index==-1)
 		{
+		//printk(KERN_INFO "No task found in this round");
 		return -1;
 		}
+	prog=self->Running[index];
 	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d/%d with commands: %d,%d,%d",prog->name,prog->app_id,prog->cur,prog->size,prog->code[prog->cur]->task,prog->code[prog->cur]->first,prog->code[prog->cur]->second);
 	if (prog->cur >= prog->size)
 		{
@@ -913,13 +909,13 @@ int perform_cmd(OS *self)
 			printk("task is done\n");
 			//printk(KERN_INFO "Task %s is finished, the results are: %d,%d\n",prog->name, prog->codevar[0],prog->codevar[1]);
 			prog->status=2;
-			OS_sleep_p(self,prog);
+			OS_sleep_p(self,index);
 			
 			return 0;
 		}
 	if(cur.task==cmd_recvc)
 		{
-			OS_sleep_p(self,prog);
+			OS_sleep_p(self,index);
 			++(prog->cur);
 			return 0;
 		}
@@ -945,7 +941,7 @@ int perform_cmd(OS *self)
 				connect_to_ip(&np[id]);
 			ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
 			++(prog->cur);
-			OS_sleep_p(self,prog);
+			OS_sleep_p(self,index);
 			
 			return 0;
 		}
@@ -1039,7 +1035,7 @@ int perform_cmd(OS *self)
 	++(prog->cur);
 	if(noti_f)
 		{
-			OS_sleep_p(self,prog);
+			OS_sleep_p(self,index);
 		}
 	else
 		{
@@ -1063,18 +1059,11 @@ int perform_cmd(OS *self)
 
 
 int OS_init(OS *self){
-	printk("1\n");
 	int i;
-	self->Running=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
-	printk("2\n");
-	*(self->Running)= RB_ROOT;
-	printk("3\n");
-	self->Sleeping=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
-	*(self->Sleeping)= RB_ROOT;
-	self->Not_started=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
-	*(self->Not_started)= RB_ROOT;
-	self->All_progs=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
-	*(self->All_progs)= RB_ROOT;
+	self->Running=kmalloc(max_prog * sizeof(struct Progs *),GFP_KERNEL);
+	self->Sleeping=kmalloc(max_prog * sizeof(struct Progs *),GFP_KERNEL);
+	self->Not_started=kmalloc(max_prog * sizeof(struct Progs *),GFP_KERNEL);
+	
 	for(i=0; i<amount_qubits;++i)
 	{
 		self->qubits[i]=0;
@@ -1088,15 +1077,11 @@ int OS_init(OS *self){
 		self->g_prio[i]=-1;
 	}
 	return 0;
-	printk("4\n");
 }
 
 
 int OS_make_prio(OS *self)
 {	
-/*	struct rb_node *lauf_node;
-	lauf_node
-
 	int i;
 	for(i=0;i<max_prog;++i)
 	{
@@ -1104,14 +1089,11 @@ int OS_make_prio(OS *self)
 		{
 			self->g_prio[i]=(10-self->Running[i]->priority)*10;
 		}
-	}*/
+	}
 	return 0;
 }
-Progs * OS_next_p(OS *self)
+int OS_next_p(OS *self)
 {
-	struct rb_node * n=rb_last(self->Running);
-	return rb_entry( n , Progs , __rb_node );
-	/*
 	int i=-1;
 	int k;
 	for(k=0;k<max_prog;++k)
@@ -1125,12 +1107,10 @@ Progs * OS_next_p(OS *self)
 	}
 	if(i==-1)
 		return -1;
-	return i;*/
+	return i;
 }
 int OS_insert_p(OS *self,Progs *prog)
 {
-	rb_insert_prog( self->Not_started , prog->priority , &(prog->__rb_node),BY_PRIO );
-/*
 	int i;
 	for(i=0; i< max_prog;++i)
 	{
@@ -1141,13 +1121,11 @@ int OS_insert_p(OS *self,Progs *prog)
 		return i;
 		}
 	}
-	return -1;*/
+	return -1;
 }
-int OS_start_p(OS *self,Progs *prog)
+int OS_start_p(OS *self,int prog_num)
 {
-	rb_erase_unode( &prog->__rb_node,self->Not_started );
-	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
-	/*int i;
+	int i;
 	for(i=0; i< max_prog;++i)
 	{
 		if(!self->used_r[i])
@@ -1159,14 +1137,11 @@ int OS_start_p(OS *self,Progs *prog)
 			return i;
 		}
 	}
-	return -1;*/
+	return -1;
 }
-int OS_sleep_p(OS *self,Progs *prog)
+int OS_sleep_p(OS *self,int prog_num)
 {
-	rb_erase_unode( &prog->__rb_node,self->Running );
-	rb_insert_prog( self->Sleeping , prog->app_id , &(prog->__rb_node),BY_ID );
 	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	/*
 	int i;
 	for(i=0; i< max_prog;++i)
 	{
@@ -1179,13 +1154,12 @@ int OS_sleep_p(OS *self,Progs *prog)
 			return i;
 		}
 	}
-	return -1;*/
+	return -1;
 }
-Progs *OS_find_appid(OS *self,uint16_t app_id)
+int OS_find_appid(OS *self,uint16_t app_id)
 {
-	return rb_search_prog( self->Sleeping , app_id ,BY_ID);
 	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	/*int i;
+	int i;
 	//printk("try to find app_id %d",app_id);
 	for(i=0; i< max_prog;++i)
 	{
@@ -1195,11 +1169,10 @@ Progs *OS_find_appid(OS *self,uint16_t app_id)
 				return i;
 		}
 	}
-	return -1;*/
+	return -1;
 }
-/*int OS_find_prot(OS *self,int prot_id)
+int OS_find_prot(OS *self,int prot_id)
 {
-	
 	//int i=kmalloc(sizeof(int),GFP_KERNEL);
 	int i;
 	//printk("try to find app_id %d",app_id);
@@ -1212,14 +1185,11 @@ Progs *OS_find_appid(OS *self,uint16_t app_id)
 		}
 	}
 	return -1;
-}*/
-int OS_wakeup_p(OS *self,Progs *prog)
+}
+int OS_wakeup_p(OS *self,int prog_num)
 {
-	rb_erase_unode( &prog->__rb_node,self->Sleeping );
-	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
-
 	//int i=kmalloc(sizeof(int),GFP_KERNEL);
-	/*int i=0;
+	int i=0;
 	for(i=0; i< max_prog;++i)
 	{
 		if(!self->used_r[i])
@@ -1232,7 +1202,7 @@ int OS_wakeup_p(OS *self,Progs *prog)
 			return i;
 		}
 	}
-	return -1;*/
+	return -1;
 }
 int OS_run_p(OS *self)
 {
@@ -1246,11 +1216,9 @@ int OS_run_p(OS *self)
 	return 1;
 	
 }
-Progs *OS_givenext_p(OS *self)
+int OS_givenext_p(OS *self)
 {
-	struct rb_node * n =rb_last(self->Not_started);
-	return rb_entry( n , Progs , __rb_node );
-	/*int i=-1;
+	int i=-1;
 	int k;
 	for(k=0;k<max_prog;++k)
 	{
@@ -1263,7 +1231,7 @@ Progs *OS_givenext_p(OS *self)
 		}
 	}
 	if(i==-1) return -1;
-	return i;*/
+	return i;
 }
 int OS_term_p(OS *self, int prog_n)
 	{
@@ -1273,6 +1241,70 @@ int OS_term_p(OS *self, int prog_n)
 
 
 
+
+
+//loading docs into the OS. I SHOULD NOT DO THIS
+
+#include <linux/fs.h>
+#include <asm/segment.h>
+#include <asm/uaccess.h>
+#include <linux/buffer_head.h>
+
+struct file *file_open(const char *path, int flags, int rights) 
+{
+    struct file *filp = NULL;
+    mm_segment_t oldfs;
+    int err = 0;
+
+    oldfs = get_fs();
+    set_fs(get_ds());
+    filp = filp_open(path, flags, rights);
+    set_fs(oldfs);
+    if (IS_ERR(filp)) {
+        err = PTR_ERR(filp);
+        return NULL;
+    }
+    return filp;
+}
+
+void file_close(struct file *file) 
+{
+    filp_close(file, NULL);
+}
+
+int file_read(struct file *file, unsigned long long offset, unsigned char *data, unsigned int size) 
+{
+    mm_segment_t oldfs;
+    int ret;
+
+    oldfs = get_fs();
+    set_fs(get_ds());
+
+    ret = vfs_read(file, data, size, &offset);
+
+    set_fs(oldfs);
+    return ret;
+}   
+
+int file_write(struct file *file, unsigned long long offset, unsigned char *data, unsigned int size) 
+{
+    mm_segment_t oldfs;
+    int ret;
+
+    oldfs = get_fs();
+    set_fs(get_ds());
+
+    ret = vfs_write(file, data, size, &offset);
+
+    set_fs(oldfs);
+    return ret;
+}
+
+int file_sync(struct file *file) 
+{
+    vfs_fsync(file, 0);
+    return 0;
+}
 
 
 
@@ -1297,8 +1329,7 @@ notifyHeader cqcN_ret;
 
 int cqc_response(OS *self)
 {
-	int res;
-	Progs *prog;	
+	int res;	
 	res =tcp_client_receive(conn_socket, cqcH_ret.str,MSG_DONTWAIT,sizeof(cqcH_ret.str));
 	if(res<0)
 		{
@@ -1314,13 +1345,13 @@ int cqc_response(OS *self)
 		//printk(KERN_INFO "Notify res: %d, data: id:%d,outcome:%d,datetime:%d, remodteappid: %d \n",res,cqcN_ret.qubit_id,cqcN_ret.outcome,(int)(cqcN_ret.datetime),(int)(cqcN_ret.remote_app_id));
 	}
 	//printk(KERN_INFO "TRY TO FIND THE ID\n");
-	prog=OS_find_appid(self,cqcH_ret.app_id);
+	res=OS_find_appid(self,cqcH_ret.app_id);
 	printk(KERN_INFO " Found prog %d for id %d\n",res,cqcH_ret.app_id);
 
 	if(cqcH_ret.type==CQC_TP_HELLO) //just a simple ping 
 		{
 		if(noti_f)
-			OS_wakeup_p(self,prog);
+			OS_wakeup_p(self,res);
 		return 0;
 		}
 
@@ -1333,25 +1364,25 @@ int cqc_response(OS *self)
 	if (cqcH_ret.type==CQC_TP_DONE)
 		{
 
-			OS_wakeup_p(self,prog);
+			OS_wakeup_p(self,res);
 		}
 	if (cqcH_ret.type==CQC_TP_RECV)
 		{
 			printk("recv qubit\n");
-			OS_wakeup_p(self,prog);
+			OS_wakeup_p(self,res);
 		}
 	else if (cqcH_ret.type==CQC_TP_MEASOUT)
 		{
-			prog->codevar[prog->code[prog->cur -1]->second]=cqcN_ret.outcome;
+			self->Sleeping[res]->codevar[self->Sleeping[res]->code[self->Sleeping[res]->cur -1]->second]=cqcN_ret.outcome;
 			if(!noti_f)
-				OS_wakeup_p(self,prog);
+				OS_wakeup_p(self,res);
 			
 		}
 	else if (cqcH_ret.type==CQC_ERR_INUSE)
 		{
 			printk(KERN_INFO "Requested qubit already in use. app_id: %d",(int)(cqcH_ret.app_id));
 			if(noti_f)
-				OS_wakeup_p(self,prog);
+				OS_wakeup_p(self,res);
 		}	
 	
 	return 0;
@@ -1396,7 +1427,6 @@ Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
 {
 	int i;
 	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
-	//new_prog->__rb_node=kmalloc(sizeof(struct rb_node),GFP_KERNEL);
 	new_prog->code=kmalloc(sizeof(command *)  *  prog_input->size,GFP_KERNEL);
 	new_prog->output_size=prog_input->res_size;
 	new_prog->codevar=kmalloc(sizeof(int)*new_prog->output_size,GFP_KERNEL);
@@ -1442,7 +1472,6 @@ int classical_recv(OS *self)
 {
 	//printk("staring classical recv\n");
 	int size,id,res;
-	Progs *prog;
 	//int bufsize = 100;
         //unsigned char buf[bufsize+1];
 	size = ksocket_receive(sock, &addr, comH.str, sizeof(comH.str));
@@ -1467,11 +1496,11 @@ int classical_recv(OS *self)
 			}*/
 		if(comH.type==com_send_int)
 			{
-			prog=OS_find_appid(self,comH.identifier);
-			if(prog->code[prog->cur-1]->first!=comH.send_name)
-				printk("The id of the programs do not match. Try to continue however: %d,%d\n",prog->code[prog->cur-1]->first ,comH.send_name);
-			prog->codevar[prog->code[prog->cur -1]->second]=comH.ms;
-			OS_wakeup_p(self,prog);
+			res=OS_find_prot(self,comH.identifier);
+			if(self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first!=comH.send_name)
+				printk("The id of the programs do not match. Try to continue however: %d,%d\n",self->Sleeping[res]->code[self->Sleeping[res]->cur-1]->first ,comH.send_name);
+			self->Sleeping[res]->codevar[self->Sleeping[res]->code[self->Sleeping[res]->cur -1]->second]=comH.ms;
+			OS_wakeup_p(self,res);
 			}
 		if(comH.type==com_send_prot)
 			{
@@ -1512,19 +1541,16 @@ Progs p;
 int prog_id;
 //char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
-#define waiting 0
+#define waiting 1
 char test_str[200];
 char test_strr[500];
 int test_i,test_res;
 comHeader com_test;
 int looping(void)
 {	
-	printk("start cycling\n");
-	OS_init(&my_os);
 	//struct socket *test_con;
 	u8 ip[]={192,168,1,MY_ID +1,'\0'};
 	int lauf;
-	Progs *prog;
 	//int id;
 	int run;
 	run=socket_open();
@@ -1535,16 +1561,16 @@ int looping(void)
 	regist[0]=connect_to_ip(htonl(create_address(ip)),ip[3]);
 	*/
 	run=0;
-	for(lauf=0;lauf<20*20*50+(1-waiting)*1000000000;++lauf)
+	for(lauf=0;lauf<20*20*50+(1-waiting)*10000000;++lauf)
 	{
 		if(kthread_should_stop()) 
 			{
 			do_exit(0);
 			}		
 		if(waiting) msleep(50);
-		if(lauf %(40 +(1-waiting)*10000000) == 0) 
+		if(lauf %(40 +(1-waiting)*100000) == 0) 
 			{
-			printk("starting round %d,Running:%d,Sleeping: %d,Not started:%d\n",lauf,sizeof_tree(my_os.Running),sizeof_tree(my_os.Sleeping),sizeof_tree(my_os.Not_started));
+			printk("starting round %d,it is in: NS %d%d%d%d , RUN %d%d%d%d , SL %d%d%d%d \n",lauf,my_os.used_n[0],my_os.used_n[1],my_os.used_n[2],my_os.used_n[3],my_os.used_r[0],my_os.used_r[1],my_os.used_r[2],my_os.used_r[3],my_os.used_s[0],my_os.used_s[1],my_os.used_s[2],my_os.used_s[3]);
 			//print_con();
 			}
 	   	if(OS_run_p(&my_os)<0)
@@ -1553,10 +1579,10 @@ int looping(void)
 			run+=1;
 			}
 		
-		prog=OS_givenext_p(&my_os);
-		if(prog!=NULL)
+		run=OS_givenext_p(&my_os);
+		if(run>-1)
 			{
-			OS_start_p(&my_os,prog);
+			OS_start_p(&my_os,run);
 			OS_make_prio(&my_os);
 			}
 		run=0;
@@ -1642,7 +1668,7 @@ static int __init ebbchar_init(void)
 	//network stuff
    printk(KERN_INFO "CL:establish TCP connection\n");
    tcp_client_connect();
-   
+   OS_init(&my_os);
    
    net_people=kmalloc(MAX_CONNS*sizeof(people *),GFP_KERNEL);
    for(i=0; i<MAX_CONNS;++i)
@@ -1764,42 +1790,14 @@ static int dev_open1(struct inode *inodep, struct file *filep){
    return 0;
 }
 
-
-
-
-
-int send_prog(int id,union Get_prog *shell)
-	{ 
-	int res;
-	comHeader comH;
-	printk("sending classical infos,%d\n",id);
-	comH.version=5;
-	comH.send_name=MY_ID;
-	comH.send_id=-1;
-	comH.type=com_send_prot;		
-	//id=get_id_of_dev_id(cur.first);
-	if(id<0)
-		printk("could not find the person\n");
-	comH.recv_name=id;
-	comH.recv_id=-1;
-	if(np[id].sock==NULL)
-		{
-		res=connect_to_ip(&np[id]);
-		printk("res: %d,sock:%p,addr:%p\n",res,np[id].sock,np[id].addr);
-		}
-	res=ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
-	printk("send_res:%d\n",res);
-	ksocket_send(np[id].sock, np[id].addr, shell->str, sizeof(shell->str));
-	printk("send_res:%d\n",res);
-	return 0;
-	}
-#define load_prog 1
-#define status_prog 2
-#define start_prog 3
-#define pause_prog 4
-#define kill_prog 5
-#define get_res 6
-#define delete_prog_done 7
+/** @brief This function is called whenever device is being read from user space i.e. data is
+ *  being sent from the device to the user. In this case is uses the copy_to_user() function to
+ *  send the buffer string to the user and captures any errors.
+ *  @param filep A pointer to a file object (defined in linux/fs.h)
+ *  @param buffer The pointer to the buffer to which this function writes the data
+ *  @param len The length of the b
+ *  @param offset The offset if required
+ */
 union return_msg {
 struct	{
 	int type;
@@ -1807,63 +1805,6 @@ struct	{
 	};
 char str[200*4+4];
 };
-static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int prog_id,command;
-	Progs *prog;
-	union Get_prog *prog_shell;
-	prog_id=cmd/10;
-	command=cmd%10;
-         switch(command) {
-                case load_prog:;
-			Progs *new_prog;
-			prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
-			copy_from_user(prog_shell->str,(char*) arg, sizeof(union Get_prog));
-			
-			//str_rep(prog_shell->str,buffer,len); 
-			if(prog_shell->np!=MY_ID)
-				{
-				send_prog(prog_shell->np,prog_shell);
-				return  0;
-				}
-			printk("shell prio:%d\n",prog_shell->prio);
-			new_prog=create_prog(prog_shell,prog_shell->prot_id);
-			new_prog->direct_input=1;
-			rb_insert_prog( my_os.All_progs , new_prog->app_id , &new_prog->__rb_node,BY_ID );
-			
-			
-			//kfree(prog_shell);
-			printk("new prog,%p \n",new_prog);
-			printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
-			OS_insert_p(&my_os,new_prog);
-                        break;
-                case status_prog: ;
-                           union return_msg ret_ms;
-			   Progs *prog;
-			   int i;
-			   int error_count = 0;
-			   prog=rb_search_prog( my_os.All_progs , prog_id ,BY_ID );
-			   printk("App_id:%d, process:%d/%d \n",prog->app_id,prog->cur,prog->size);
-			   if(prog->status==2)
-				{
-			   	ret_ms.type=1;
-				for (i=0;i<prog->output_size;++i)
-					ret_ms.results[i]=prog->codevar[i];
-				
-				}
-			   else
-				{
-				ret_ms.type=0;
-				ret_ms.results[0]=prog->cur;
-				ret_ms.results[1]=prog->size;
-				}
-			   error_count = copy_to_user((char*) arg, ret_ms.str, sizeof(ret_ms.str));
-			   break;
-				
-		}
-		return 0;
-}
-
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
 
    union return_msg ret_ms;
@@ -1908,7 +1849,31 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param len The length of the array of data that is being passed in the const char buffer
  *  @param offset The offset if required
  */
-
+int send_prog(int id,union Get_prog *shell)
+	{
+	int res;
+	comHeader comH;
+	printk("sending classical infos,%d\n",id);
+	comH.version=5;
+	comH.send_name=MY_ID;
+	comH.send_id=-1;
+	comH.type=com_send_prot;		
+	//id=get_id_of_dev_id(cur.first);
+	if(id<0)
+		printk("could not find the person\n");
+	comH.recv_name=id;
+	comH.recv_id=-1;
+	if(np[id].sock==NULL)
+		{
+		res=connect_to_ip(&np[id]);
+		printk("res: %d,sock:%p,addr:%p\n",res,np[id].sock,np[id].addr);
+		}
+	res=ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+	printk("send_res:%d\n",res);
+	ksocket_send(np[id].sock, np[id].addr, shell->str, sizeof(shell->str));
+	printk("send_res:%d\n",res);
+	return 0;
+	}
 
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
   
@@ -1921,7 +1886,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    if(prog_shell->np!=MY_ID)
 	{
 	send_prog(prog_shell->np,prog_shell);
-	return 0;
+	return  0;
 	}
    printk("shell prio:%d\n",prog_shell->prio);
    new_prog=create_prog(prog_shell,prog_shell->prot_id);
