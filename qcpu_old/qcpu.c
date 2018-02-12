@@ -24,8 +24,8 @@
 #define DEFAULT_PORT 8850
 
 //#include "udp_net/mod.h"
-//#define likely(x)       __builtin_expect((x),1)
-//#define unlikely(x)     __builtin_expect((x),0)
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
 
 
 struct parties
@@ -54,7 +54,7 @@ MODULE_DESCRIPTION("Node OS");
 MODULE_VERSION("0.0.1");   
 
 static int    majorNumber;                  
-//static short  size_of_message;              ///< Used to remember the size of the string stored
+static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
 static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
@@ -187,21 +187,21 @@ int get_empty_id(void);
 
 
 
-/*
+
 int my_kill_proc(pid_t pid, int sig) {
-    int error = -ESRCH;           
+    int error = -ESRCH;           /* default return value */
     struct task_struct* p;
     struct task_struct* t = NULL; 
     struct pid* pspid;
     rcu_read_lock();
-    p = &init_task;              
+    p = &init_task;               /* start at init */
     do {
-        if (p->pid == pid) {      
+        if (p->pid == pid) {      /* does the pid (not tgid) match? */
             t = p;    
             break;
         }
-        p = next_task(p);         
-    } while (p != &init_task);    
+        p = next_task(p);         /* "this isn't the task you're looking for" */
+    } while (p != &init_task);    /* stop when we get back to init */
     if (t != NULL) {
         pspid = t->pids[PIDTYPE_PID].pid;
         if (pspid != NULL) error = kill_pid(pspid,sig,1);
@@ -209,7 +209,7 @@ int my_kill_proc(pid_t pid, int sig) {
     rcu_read_unlock();
     return error;
 }
-*/
+
 
 /* function prototypes */
 
@@ -220,7 +220,7 @@ int socket_open(void)
 	int  err;
 
         current->flags |= PF_NOFREEZE;
-	//allow_signal(SIGKILL);
+	allow_signal(SIGKILL);
 	if ( (err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock)) < 0)
 	{
 		printk(KERN_INFO ": Could not create a datagram socket, error = %d\n", -ENXIO);
@@ -437,9 +437,9 @@ int tcp_client_connect(void)
 {
         
       
-        //int len = 49;
-        //char response[len+1];
-        //char reply[len+1];
+        int len = 49;
+        char response[len+1];
+        char reply[len+1];
         int ret = -1;
 
         //DECLARE_WAITQUEUE(recv_wait, current);
@@ -516,15 +516,15 @@ err:
 
 #define cmd_if			100	
 #define cmd_goto		101
-#define cmd_add			102   //third:0 two variables, third:1 add int to variable,third:2 set variable to int
-#define cmd_multi		104
-#define cmd_setval		105
+#define cmd_add			102
+#define cmd_multi		103
+#define cmd_setval		104
 
 
 
 
-#define cmd_sendc		201 	//var,person_name
-#define cmd_recvc		202	//var,person_name
+#define cmd_sendc		201 	//person_name, var
+#define cmd_recvc		202	//person_name, var 
 
 #define cmd_done		1000
 
@@ -571,7 +571,7 @@ typedef union
 		uint16_t recv_id; //prog_id
 		uint8_t type;	
 		uint64_t identifier; //the input of the ms
-		int64_t ms;
+		uint64_t ms;
 		uint32_t extra_length;
 	} __attribute__((__packed__));
 	char str[COM_LENGTH];		/* Additional details for this command */
@@ -631,9 +631,8 @@ Progs * rb_insert_prog( struct rb_root * root , int target , struct rb_node * so
 
               parent = *p;
               ans = rb_entry( parent , Progs, __rb_node );
-	      if(type==BY_PRIO) 	lauf=ans->priority;
-	      else if(type==BY_ID)		lauf=ans->app_id;
-	      else lauf=0;	
+	      	if(type==BY_PRIO) 	lauf=ans->priority;
+		if(type==BY_ID)		lauf=ans->app_id;
               if( target < lauf )
                      p = &(*p)->rb_left;
               else if( (target > lauf)||type==BY_PRIO ) //ID cares about none being equal.
@@ -708,9 +707,8 @@ int OS_sleep_p(OS *self,Progs *prog);
 
 int perform_cmd(OS *self)
 {	
-	int lauf=0;
+	int lauf=0;;
 	Progs *prog=OS_next_p(self);
-	int *c=prog->codevar;
 	if(prog==NULL)
 		{
 		return -1;
@@ -728,40 +726,28 @@ start:
 	switch(cur.task)
 	{
 	case(cmd_if): //if statement
+		{
+		if(prog->codevar[cur.first])
+		(prog->cur)+=2; // If true the second line is executed
 		++lauf;
-		if(cur.third==-2) //smaller
-			if(c[cur.first]<c[cur.second])
-				--(prog->cur);
-		if(cur.third==-1) //smaller-eq
-			if(c[cur.first]<=c[cur.second])
-				--(prog->cur);
-		if(cur.third==0) //eq
-			if(c[cur.first]==c[cur.second])
-				--(prog->cur);
-		if(cur.third==1) //larger-eq
-			if(c[cur.first]>=c[cur.second])
-				--(prog->cur);
-		if(cur.third==2) //larger
-			if(c[cur.first]>c[cur.second])
-				--(prog->cur);
-		(prog->cur)+=2; // Only if true, the next line is executed
 		goto start;
+			
+		}
 	case(cmd_goto):
+		{
 		prog->cur=cur.first;
 		++lauf;
 		goto start;
-	case(cmd_add):
-		if(cur.third==0)
-			c[cur.first]+=c[cur.second];
-		if(cur.third==1)
-			c[cur.first]+=cur.second;
-		if(cur.third==2)
-			c[cur.first]=cur.second;
+		}
+	case(cmd_add)
 	case(cmd_done):
-		printk("program is done\n");
+		{
+		printk("task is done\n");
 		prog->status=2;
 		OS_sleep_p(self,prog);
 		return 0;
+		}
+
 	case(cmd_recvc):
 		{
 		OS_sleep_p(self,prog);
@@ -774,7 +760,7 @@ start:
 		comHeader comH;
 		printk("sending classical infos\n");
 		comH.version=0;
-		comH.type=cmd_sendc;
+		comH.type=11;
 		comH.send_name=MY_ID;
 		comH.send_id=prog->app_id;
 		id=cur.second;
@@ -783,7 +769,7 @@ start:
 		comH.recv_name=cur.second;
 		comH.recv_id=cur.second;
 		comH.identifier=prog->prot_id;
-		comH.ms=c[cur.first];
+		comH.ms=prog->codevar[cur.first];
 		if(np[id].sock==NULL)
 			connect_to_ip(&np[id]);
 		ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
@@ -809,7 +795,8 @@ start:
 		}
 	case(cmd_new_qubit):	case(cmd_reset): 
 		{
-		set_up_xheaders(prog,&cur);//adds the qubit_id here
+		set_up_xheaders(prog,&cur);
+		cmdH.qubit_id=cur.first;
 		cqcH.length = CQC_CMD_HDR_LENGTH;
 		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
 		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
@@ -819,7 +806,6 @@ start:
 		{
 		set_up_xheaders(prog,&cur);
 		cqcH.length = CQC_CMD_HDR_LENGTH;
-		cmdH.qubit_id=cur.first;
 		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
 		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
 		goto end;
@@ -942,7 +928,6 @@ Progs * OS_next_p(OS *self)
 int OS_insert_p(OS *self,Progs *prog)
 {
 	rb_insert_prog( self->Not_started , prog->priority , &(prog->__rb_node),BY_PRIO );
-	return 0;
 
 }
 int OS_start_p(OS *self,Progs *prog)
@@ -982,7 +967,7 @@ int OS_wakeup_p(OS *self,Progs *prog)
 {
 	rb_erase_unode( &prog->__rb_node,self->Sleeping );
 	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
-	return 0;
+
 }
 int OS_run_p(OS *self)
 {
@@ -1004,8 +989,8 @@ Progs *OS_givenext_p(OS *self)
 }
 int OS_del_p(OS *self, Progs *prog)
 	{
-	//int i;
-	//Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
+	int i;
+	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
 	kfree(prog->code);prog->code=NULL;
 	kfree(prog->codevar);prog->codevar=NULL;
 	kfree(prog);prog=NULL;
@@ -1016,7 +1001,7 @@ int OS_del_p(OS *self, Progs *prog)
 
 int OS_shutdown(OS *self)
 {
-	return 0;
+	
 }
 
 
@@ -1176,7 +1161,7 @@ int str_rep( char *into,const char *from,int len)
 #define com_send_prot		101
 
 #define com_start_prot		10
-//define com_send_int		11
+#define com_send_int		11
 
 
 comHeader comH;
@@ -1184,7 +1169,7 @@ comHeader comH;
 int classical_recv(OS *self)
 {
 	//printk("staring classical recv\n");
-	int size,id;//,res;
+	int size,id,res;
 	Progs *prog;
 	//int bufsize = 100;
         //unsigned char buf[bufsize+1];
@@ -1200,7 +1185,7 @@ int classical_recv(OS *self)
 			printk("name does not fit or is new. change %d to %d",regist[id]->name_num,comH.send_name);
 			regist[id]->name_num=comH.send_name;
 			}*/
-		if(comH.type==cmd_sendc)
+		if(comH.type==com_send_int)
 			{
 			prog=OS_find_appid(self,comH.identifier);
 			if(prog->code[prog->cur-1]->first!=comH.send_name)
@@ -1236,16 +1221,14 @@ cqcHeader cqc_back_cmd;
 comHeader com_test;
 int looping(void)
 {	
-	int lauf,run;
-	Progs *prog;
 	printk("start cycling\n");
 	OS_init(&my_os);
 	//struct socket *test_con;
 	//u8 ip[]={192,168,1,MY_ID +1,'\0'};
-	
-	
+	int lauf;
+	Progs *prog;
 	//int id;
-	
+	int run;
 	run=socket_open();
 	printk("sock_con res:%d\n",run);
 	/*for(run=0; run<max_con;++run)
@@ -1463,13 +1446,13 @@ char str[200*4+4];
 static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int prog_id,command;
-	Progs *new_prog;
+	Progs *prog;
 	union Get_prog *prog_shell;
 	prog_id=cmd/10;
 	command=cmd%10;
          switch(command) {
                 case load_prog:;
-			//Progs *new_prog;
+			Progs *new_prog;
 			prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
 			copy_from_user(prog_shell->str,(char*) arg, sizeof(union Get_prog));
 			

@@ -1,0 +1,4 @@
+g++ qgcc.cpp -o qgcc
+./qgcc
+python2 qasm2tex.py outp.qasm > outp.tex
+pdflatex outp.tex

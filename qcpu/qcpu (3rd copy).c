@@ -1,4 +1,14 @@
-
+/**
+ * @file   ebbchar.c
+ * @author Derek Molloy
+ * @date   7 April 2015
+ * @version 0.1
+ * @brief   An introductory character driver to support the second article of my series on
+ * Linux loadable kernel module (LKM) development. This module maps to /dev/ebbchar and
+ * comes with a helper C program that can be run in Linux user space to communicate with
+ * this the LKM.
+ * @see http://www.derekmolloy.ie/ for a full description and follow-up descriptions.
+ */
 #include <linux/init.h>           // Macros used to mark up functions e.g. __init __exit
 #include <linux/module.h>         // Core header for loading LKMs into the kernel
 #include <linux/device.h>         // Header to support the kernel Driver Model
@@ -24,9 +34,6 @@
 #define DEFAULT_PORT 8850
 
 //#include "udp_net/mod.h"
-//#define likely(x)       __builtin_expect((x),1)
-//#define unlikely(x)     __builtin_expect((x),0)
-
 
 struct parties
 {
@@ -48,25 +55,29 @@ return 0;
 }
 struct parties my_info;
 
-MODULE_LICENSE("GPL");           
-MODULE_AUTHOR("Lennart Bittel");   
-MODULE_DESCRIPTION("Node OS"); 
-MODULE_VERSION("0.0.1");   
+MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
+MODULE_AUTHOR("Lennart Bittel");    ///< The author -- visible when you use modinfo
+MODULE_DESCRIPTION("Node OS");  ///< The description -- see modinfo
+MODULE_VERSION("0.0.1");            ///< A version number to inform users
 
-static int    majorNumber;                  
-//static short  size_of_message;              ///< Used to remember the size of the string stored
+static int    majorNumber;                  ///< Stores the device number -- determined automatically
+//static char   message[256] = "hello this is a test";           ///< Memory for the string that is passed from userspace
+static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
 static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
 
-
+// The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open1(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg);
 
-
+/** @brief Devices are represented as file structure in the kernel. The file_operations structure from
+ *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
+ *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
+ */
 u32 create_address(u8 *ip)
 {
         u32 addr = 0;
@@ -187,21 +198,21 @@ int get_empty_id(void);
 
 
 
-/*
+
 int my_kill_proc(pid_t pid, int sig) {
-    int error = -ESRCH;           
+    int error = -ESRCH;           /* default return value */
     struct task_struct* p;
     struct task_struct* t = NULL; 
     struct pid* pspid;
     rcu_read_lock();
-    p = &init_task;              
+    p = &init_task;               /* start at init */
     do {
-        if (p->pid == pid) {      
+        if (p->pid == pid) {      /* does the pid (not tgid) match? */
             t = p;    
             break;
         }
-        p = next_task(p);         
-    } while (p != &init_task);    
+        p = next_task(p);         /* "this isn't the task you're looking for" */
+    } while (p != &init_task);    /* stop when we get back to init */
     if (t != NULL) {
         pspid = t->pids[PIDTYPE_PID].pid;
         if (pspid != NULL) error = kill_pid(pspid,sig,1);
@@ -209,7 +220,7 @@ int my_kill_proc(pid_t pid, int sig) {
     rcu_read_unlock();
     return error;
 }
-*/
+
 
 /* function prototypes */
 
@@ -220,7 +231,7 @@ int socket_open(void)
 	int  err;
 
         current->flags |= PF_NOFREEZE;
-	//allow_signal(SIGKILL);
+	allow_signal(SIGKILL);
 	if ( (err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock)) < 0)
 	{
 		printk(KERN_INFO ": Could not create a datagram socket, error = %d\n", -ENXIO);
@@ -236,7 +247,16 @@ int socket_open(void)
                 goto close_and_out;
         }
 	printk(KERN_INFO": listening on port %d\n", DEFAULT_PORT);
-	
+	/*while(1)
+	{
+		memset(&buf, 0, bufsize+1);
+                size = ksocket_receive(sock, &addr, buf, bufsize);
+		if (signal_pending(current))
+                        break;
+		printk("Inaddr: %d/%d,current s_addr:%d",INADDR_ANY,htonl(INADDR_ANY), addr.sin_addr.s_addr);
+		printk(KERN_INFO MODULE_NAME": received %d bytes\n", size);
+                printk("data: %s\n", buf);
+	}*/
 	return 0;
 close_and_out:
         sock_release(sock);
@@ -246,13 +266,22 @@ close_and_out:
 out:
 	return -2;
 }
+/*struct con_infos{
+	char name[10];
+	int name_num;
+	unsigned long ip;
+	struct socket *sock;
+	struct sockaddr_in *addr;
+};*/
 
 
 int connect_to_ip(struct parties *person)
 {
 	int err;
 	person->addr=kmalloc(sizeof(struct sockaddr_in),GFP_KERNEL);
-
+	//struct socket *sock_send;
+        //struct sockaddr_in addr_send;
+	//struct con_infos *infos=kmalloc(sizeof(struct con_infos), GFP_KERNEL);
 	printk("trying to connect to %s\n",person->name);
 	if((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &(person->sock))) < 0 )
 	{
@@ -275,6 +304,53 @@ close_and_out:
         person->sock = NULL;
 	return -1;
 }
+/*int get_id_of_ip(unsigned long address)
+{
+	int i;
+	for(i=0;i<max_con;++i)
+		if(regist[i]!=NULL)
+			{
+			printk("%d,%ld\n",regist[i]->addr->sin_addr.s_addr,address);
+			if(regist[i]->ip==address)
+				return i;
+			}
+	return -1;
+}
+int get_id_of_dev_id(int dev_id)
+{
+	int i;
+	for(i=0;i<max_con;++i)
+		if(regist[i]!=NULL)
+			{
+			printk("%d,%d\n",regist[i]->name_num,dev_id);
+			if(regist[i]->name_num==dev_id)
+				return i;
+			}
+	return -1;
+}
+int print_con(void)
+{
+	int i;
+	printk("printing all connections");
+	for(i=0;i<max_con;++i)
+		{
+		if(regist[i]!=NULL)
+			{
+			printk("id: %d name:%d,ip:%ld\n",i,regist[i]->name_num,regist[i]->ip);
+			}
+		}
+	printk("done\n");
+	return 0;
+}
+int get_empty_id(void)
+{
+	int i;
+	for(i=0;i<max_con;++i)
+		if(regist[i]==NULL)
+			return i;
+	return max_con;
+}*/
+
 
 int ksocket_send(struct socket *sock, struct sockaddr_in *addr, unsigned char *buf, int len)
 {
@@ -436,10 +512,18 @@ struct sockaddr_in saddr;
 int tcp_client_connect(void)
 {
         
-      
-        //int len = 49;
-        //char response[len+1];
-        //char reply[len+1];
+        /*
+        struct sockaddr_in daddr;
+        struct socket *data_socket = NULL;
+        */
+        
+        /*
+        char *response = kmalloc(4096, GFP_KERNEL);
+        char *reply = kmalloc(4096, GFP_KERNEL);
+        */
+        int len = 49;
+        char response[len+1];
+        char reply[len+1];
         int ret = -1;
 
         //DECLARE_WAITQUEUE(recv_wait, current);
@@ -465,19 +549,46 @@ int tcp_client_connect(void)
                         "socket. | setup_connection *** \n", ret);
                 goto err;
         }
-	/*
+
         memset(&reply, 0, len+1);
         strcat(reply, "hello"); 
-	
-        wait_event_timeout(recv_wait,!skb_queue_empty(&conn_socket->sk->sk_receive_queue),5*HZ);
+	/*
+	cqcHeader cqcH;
 
+	cqcH.version = 0;
+	cqcH.app_id = 13;
+	cqcH.type = 0;
+	cqcH.length = 0;
+        //tcp_client_send(conn_socket, reply, strlen(reply), MSG_DONTWAIT);
+	tcp_client_send(conn_socket, cqcH.str, CQC_HDR_LENGTH, MSG_DONTWAIT);
+	*/
+	/*memset(&reply, 0, len+1);
+	strcat(reply, "HOLAdickface"); 
+	tcp_client_send(conn_socket, reply, strlen(reply), MSG_DONTWAIT);*/
+        wait_event_timeout(recv_wait,!skb_queue_empty(&conn_socket->sk->sk_receive_queue),\
+                                                                        5*HZ);
+        
+        /*add_wait_queue(&conn_socket->sk->sk_wq->wait, &recv_wait);
+        while(1)
+        {
+                //__set_current_status(TASK_INTERRUPTIBLE);
+                schedule_timeout(HZ);*/
+        
                 if(!skb_queue_empty(&conn_socket->sk->sk_receive_queue))
                 {
+                        /*
+                        __set_current_status(TASK_RUNNING);
+                        remove_wait_queue(&conn_socket->sk->sk_wq->wait,\
+                                                              &recv_wait);
+                        */
                         memset(&response, 0, len+1);
                         tcp_client_receive(conn_socket, response, MSG_DONTWAIT,50);
                         //break;
                 }
-	*/
+
+        /*
+        }
+        */
 
 err:
         return -1;
@@ -487,8 +598,89 @@ err:
 
 
 
+typedef struct
+{
+	char name_str [20];
+	u_int32_t ip;
+	unsigned int port;
+	uint32_t name;
+	uint32_t id;
+	struct socket *sock;
+}people;
+people **net_people;
 
 
+
+
+
+
+
+
+/*
+struct socket *connect_person(u32 adress,int port)
+{
+	struct socket *person_socket = NULL;
+	struct sockaddr_in saddr;
+	int ret;
+	DECLARE_WAIT_QUEUE_HEAD(recv_wait);
+	ret = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &person_socket);
+	if(ret<0) 
+		{
+		printk(KERN_INFO "Could not connect to socket\n");
+		return NULL;
+		}
+	memset(&saddr, 0, sizeof(saddr));
+        saddr.sin_family = AF_INET;
+        saddr.sin_port = htons(port);
+        saddr.sin_addr.s_addr = htonl(adress);
+
+        ret = person_socket->ops->connect(person_socket, (struct sockaddr *)&saddr , sizeof(saddr), O_RDWR);
+	if(ret && (ret != -EINPROGRESS))
+		{
+		printk(KERN_INFO "Could not connect to person\n");
+		return NULL;
+		}
+	return person_socket;
+}
+
+int person_send(people *contact,int cmd, int prot_id,char *ad_mes)
+{
+	int res;
+	comHeader comH;
+	comH.version=0;
+	comH.my_name=PORT;
+	comH.my_id=PORT;
+	comH.other_name=contact->name;
+	comH.other_id=contact->id;
+	comH.type=cmd;
+	comH.identifier=prot_id;
+	if(cmd==com_message)
+		comH.extra_length=sizeof(ad_mes);
+	else
+		comH.extra_length=0;
+	
+	//res=tcp_client_send(contact->sock, comH.str,COM_LENGTH, MSG_DONTWAIT);
+	if(sizeof(ad_mes)>0||1)
+		{
+		res=tcp_client_send(contact->sock, ad_mes,sizeof(ad_mes), MSG_DONTWAIT);
+		}
+	printk("message was sent %d\n",res);
+	return 0;
+}
+int person_recv(people *contact)
+{
+	int reply_int;
+	comHeader comH;
+	reply_int =tcp_client_receive(conn_socket, comH.str,MSG_DONTWAIT,COM_LENGTH);
+	if(reply_int<0)
+		{
+		printk(KERN_INFO "No message recv %d\n",reply_int);
+		return -1;
+		}
+	printk("Message recieved from: %d,with type:%d\n",comH.my_id,comH.type);
+	return 0;
+}
+*/
 //end communication between people
 
 
@@ -512,19 +704,13 @@ err:
 #define cmd_kgate		18	/* K Gate - taking computational to Y eigenbasis */
 
 #define cmd_cnot		20	/* CNOT Gate with this as control */
-#define cmd_cphase		21	/* CPHASE Gate with this as control (not that it matters) */
+#define cmd_cphase		21	/* CPHASE Gate with this as control */
 
-#define cmd_if			100	
+#define cmd_if			100
 #define cmd_goto		101
-#define cmd_add			102   //third:0 two variables, third:1 add int to variable,third:2 set variable to int
-#define cmd_multi		104
-#define cmd_setval		105
 
-
-
-
-#define cmd_sendc		201 	//var,person_name
-#define cmd_recvc		202	//var,person_name
+#define cmd_sendc		201 	//person_name, var
+#define cmd_recvc		202	//person_name, var 
 
 #define cmd_done		1000
 
@@ -559,6 +745,7 @@ typedef struct {
 	}Progs;
 #define max_prog 50
 #define amount_qubits 10
+//typedef enum { false, true } bool;
 #define	COM_LENGTH      34
 typedef union
 {
@@ -571,7 +758,7 @@ typedef union
 		uint16_t recv_id; //prog_id
 		uint8_t type;	
 		uint64_t identifier; //the input of the ms
-		int64_t ms;
+		uint64_t ms;
 		uint32_t extra_length;
 	} __attribute__((__packed__));
 	char str[COM_LENGTH];		/* Additional details for this command */
@@ -631,9 +818,8 @@ Progs * rb_insert_prog( struct rb_root * root , int target , struct rb_node * so
 
               parent = *p;
               ans = rb_entry( parent , Progs, __rb_node );
-	      if(type==BY_PRIO) 	lauf=ans->priority;
-	      else if(type==BY_ID)		lauf=ans->app_id;
-	      else lauf=0;	
+	      	if(type==BY_PRIO) 	lauf=ans->priority;
+		if(type==BY_ID)		lauf=ans->app_id;
               if( target < lauf )
                      p = &(*p)->rb_left;
               else if( (target > lauf)||type==BY_PRIO ) //ID cares about none being equal.
@@ -692,194 +878,168 @@ xtraCmdHeader xtra;
 command cur;
 #define CQC_OPT_NOTIFY 		0x01
 #define CQC_OPT_BLOCK           0x04
-void inline set_up_xheaders(Progs *prog,command *cur)
-{
-	cqcH.version = 0;
-	cqcH.app_id = prog->app_id;
-	cqcH.type = 1; //command
-	
-	cmdH.qubit_id=cur->first;
-	cmdH.instr=cur->task;
-	cmdH.options=noti_f*CQC_OPT_NOTIFY+CQC_OPT_BLOCK;// determines notify, block, action Add as additional!!
-	xtra.cmdLength = 0;
-}
+
 Progs * OS_next_p(OS *self);
 int OS_sleep_p(OS *self,Progs *prog);
 
 int perform_cmd(OS *self)
 {	
-	int lauf=0;
 	Progs *prog=OS_next_p(self);
-	int *c=prog->codevar;
 	if(prog==NULL)
 		{
 		return -1;
 		}
-start:
-	if(unlikely(lauf>100)) return 1;
-
 	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d/%d with commands: %d,%d,%d",prog->name,prog->app_id,prog->cur,prog->size,prog->code[prog->cur]->task,prog->code[prog->cur]->first,prog->code[prog->cur]->second);
-	if (unlikely(prog->cur >= prog->size))
+	if (prog->cur >= prog->size)
 		{
 		printk("in unwanted areas\n");
 		return -3;
 		}
 	cur=*(prog->code[prog->cur]);
-	switch(cur.task)
-	{
-	case(cmd_if): //if statement
-		++lauf;
-		if(cur.third==-2) //smaller
-			if(c[cur.first]<c[cur.second])
-				--(prog->cur);
-		if(cur.third==-1) //smaller-eq
-			if(c[cur.first]<=c[cur.second])
-				--(prog->cur);
-		if(cur.third==0) //eq
-			if(c[cur.first]==c[cur.second])
-				--(prog->cur);
-		if(cur.third==1) //larger-eq
-			if(c[cur.first]>=c[cur.second])
-				--(prog->cur);
-		if(cur.third==2) //larger
-			if(c[cur.first]>c[cur.second])
-				--(prog->cur);
-		(prog->cur)+=2; // Only if true, the next line is executed
-		goto start;
-	case(cmd_goto):
+	//printk(KERN_INFO "Taks started:%d, %d\n",prog->cur,cur.task);
+	//cqc_task
+	
+	if(cur.task==cmd_if) //if statement
+		{
+			if(prog->codevar[cur.first])
+				(prog->cur)+=2; // If true the second line is executed
+			return 0;
+			
+		}
+	else if (cur.task==cmd_goto)
 		prog->cur=cur.first;
-		++lauf;
-		goto start;
-	case(cmd_add):
-		if(cur.third==0)
-			c[cur.first]+=c[cur.second];
-		if(cur.third==1)
-			c[cur.first]+=cur.second;
-		if(cur.third==2)
-			c[cur.first]=cur.second;
-	case(cmd_done):
-		printk("program is done\n");
-		prog->status=2;
-		OS_sleep_p(self,prog);
-		return 0;
-	case(cmd_recvc):
+	else if (cur.task==cmd_done)
 		{
-		OS_sleep_p(self,prog);
-		++(prog->cur);
-		return 0;
+			printk("task is done\n");
+			//printk(KERN_INFO "Task %s is finished, the results are: %d,%d\n",prog->name, prog->codevar[0],prog->codevar[1]);
+			prog->status=2;
+			OS_sleep_p(self,prog);
+			
+			return 0;
 		}
-	case(cmd_sendc):
+	if(cur.task==cmd_recvc)
 		{
-		int id;
-		comHeader comH;
-		printk("sending classical infos\n");
-		comH.version=0;
-		comH.type=cmd_sendc;
-		comH.send_name=MY_ID;
-		comH.send_id=prog->app_id;
-		id=cur.second;
-		if(id<0)
-			printk("could not find the person\n");
-		comH.recv_name=cur.second;
-		comH.recv_id=cur.second;
-		comH.identifier=prog->prot_id;
-		comH.ms=c[cur.first];
-		if(np[id].sock==NULL)
-			connect_to_ip(&np[id]);
-		ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
-		++(prog->cur);
-		OS_sleep_p(self,prog);
-		return 0;
+			OS_sleep_p(self,prog);
+			++(prog->cur);
+			return 0;
 		}
-	case(-1):
+	if(cur.task==cmd_sendc)
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.type = 0;
-		cqcH.length = 0;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH, MSG_DONTWAIT);
-		goto end;
+			int id;
+			comHeader comH;
+			printk("sending classical infos\n");
+			comH.version=5;
+			comH.type=11;
+			comH.send_name=MY_ID;
+			comH.send_id=prog->app_id;
+			
+			//id=get_id_of_dev_id(cur.first);
+			id=cur.second;
+			if(id<0)
+				printk("could not find the person\n");
+			comH.recv_name=cur.second;
+			comH.recv_id=cur.second;
+			comH.identifier=prog->prot_id;
+			comH.ms=prog->codevar[cur.first];
+			if(np[id].sock==NULL)
+				connect_to_ip(&np[id]);
+			ksocket_send(np[id].sock, np[id].addr, comH.str, sizeof(comH.str));
+			++(prog->cur);
+			OS_sleep_p(self,prog);
+			
+			return 0;
 		}
-	case(cmd_identity):
+	cqcH.version = 0;
+	cqcH.app_id = prog->app_id;
+	cqcH.type = 1; //command
+	
+	++(prog->priority);
+	
+	cmdH.qubit_id=cur.first;
+	cmdH.instr=cur.task;
+	cmdH.options=noti_f*CQC_OPT_NOTIFY+CQC_OPT_BLOCK;// determines notify, block, action Add as additional!!
+	
+
+	
+	xtra.cmdLength = 0;
+	if(cur.task==-1)
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH, MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		goto end;
+			cqcH.type = 0;
+			cqcH.length = 0;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH, MSG_DONTWAIT);
+			
 		}
-	case(cmd_new_qubit):	case(cmd_reset): 
+	if(cur.task==cmd_identity) 
 		{
-		set_up_xheaders(prog,&cur);//adds the qubit_id here
-		cqcH.length = CQC_CMD_HDR_LENGTH;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		goto end;
+			cqcH.length = CQC_CMD_HDR_LENGTH;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH, MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
+		
 		}
-	case(cmd_meas): case(cmd_meas_rm):  //measurement of qubit
+	else if(cur.task==cmd_new_qubit||cur.task==cmd_reset) //new qubit
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH;
-		cmdH.qubit_id=cur.first;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		goto end;
+			cmdH.qubit_id=cur.first;
+			cqcH.length = CQC_CMD_HDR_LENGTH;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
 		}
-	case(cmd_xgate): case(cmd_ygate):case(cmd_zgate):case(cmd_hgate):case(cmd_kgate)://single qubits
+	else if(cur.task==cmd_meas ||cur.task==cmd_meas_rm)  //measurement of qubit
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		goto end;
+			
+			cqcH.length = CQC_CMD_HDR_LENGTH;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
+			
+		}
+	else if((cur.task<=13 && cur.task>=10) ||cur.task==cmd_hgate || cur.task==cmd_kgate) //single qubit gates
+		{
+			cqcH.length = CQC_CMD_HDR_LENGTH;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
 		}
 
-	case(cmd_cnot): case(cmd_cphase): //two qubit gates
+	else if(cur.task==cmd_cnot || cur.task==cmd_cphase ) //single qubit gates
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
-		xtra.xtra_qubit_id=cur.second;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
-		goto end;
+			cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
+			xtra.xtra_qubit_id=cur.second;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
 		}
-	case(cmd_xrot): case(cmd_yrot): case(cmd_zrot ): //single qubit rotations
+	else if(cur.task==cmd_xrot || cur.task==cmd_yrot || cur.task==cmd_zrot ) //single qubit gates
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
-		xtra.steps=cur.second;
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
-		goto end;
+			cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
+			xtra.steps=cur.second;
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
 		}
-	case(cmd_sendq): case(cmd_recvq):  case(cmd_eprq): //connection with bell pairs
+	else if(cur.task==cmd_sendq || cur.task==cmd_recvq || cur.task==cmd_eprq) //connection with bell pairs
 		{
-		set_up_xheaders(prog,&cur);
-		cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
-		//xtra.remote_node=htonl(create_address(destip));
-		xtra.remote_node=create_address(destip);
-		xtra.remote_node=saddr.sin_addr.s_addr;
-		xtra.remote_node=2130706433;
-		//xtra.remote_port=htons(8820+cur.second);
-		xtra.remote_port=np[cur.second].cqc_port;
-		xtra.remote_app_id=prog->app_id;
-		/*char test_str[CQC_HDR_LENGTH+CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH];
-		strcpy(test_str,cqcH.str);
-		strcat(test_str,cqcH.str);
-		strcat(test_str,cqcH.str);
-		tcp_client_send(conn_socket, test_str,CQC_HDR_LENGTH+CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);*/
-		printk("trying to send cmd:%d,ip:%d,port:%d\n",cur.task,xtra.remote_node,xtra.remote_port);
-		tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
-		tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
+			
+			cqcH.length = CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH;
+			//xtra.remote_node=htonl(create_address(destip));
+			xtra.remote_node=create_address(destip);
+			xtra.remote_node=saddr.sin_addr.s_addr;
+			xtra.remote_node=2130706433;
+			//xtra.remote_port=htons(8820+cur.second);
+			xtra.remote_port=np[cur.second].cqc_port;
+			xtra.remote_app_id=prog->app_id;
+			
+			/*char test_str[CQC_HDR_LENGTH+CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH];
+			strcpy(test_str,cqcH.str);
+			strcat(test_str,cqcH.str);
+			strcat(test_str,cqcH.str);
+			tcp_client_send(conn_socket, test_str,CQC_HDR_LENGTH+CQC_CMD_HDR_LENGTH+CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);*/
+			printk("trying to send cmd:%d,ip:%d,port:%d\n",cur.task,xtra.remote_node,xtra.remote_port);
+			tcp_client_send(conn_socket, cqcH.str,CQC_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, cmdH.str,CQC_CMD_HDR_LENGTH , MSG_DONTWAIT);
+			tcp_client_send(conn_socket, xtra.str,CQC_CMD_XTRA_LENGTH , MSG_DONTWAIT);
 		}
-	}
-end:
 	++(prog->cur);
 	if(noti_f)
 		{
-		OS_sleep_p(self,prog);
+			OS_sleep_p(self,prog);
 		}
 	else
 		{
@@ -903,9 +1063,12 @@ end:
 
 
 int OS_init(OS *self){
+	printk("1\n");
 	int i;
 	self->Running=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
+	printk("2\n");
 	*(self->Running)= RB_ROOT;
+	printk("3\n");
 	self->Sleeping=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
 	*(self->Sleeping)= RB_ROOT;
 	self->Not_started=kmalloc(sizeof(struct rb_root),GFP_KERNEL);
@@ -925,42 +1088,114 @@ int OS_init(OS *self){
 		self->g_prio[i]=-1;
 	}
 	return 0;
+	printk("4\n");
 }
 
 
 int OS_make_prio(OS *self)
 {	
+/*	struct rb_node *lauf_node;
+	lauf_node
 
+	int i;
+	for(i=0;i<max_prog;++i)
+	{
+		if(self->used_r[i])
+		{
+			self->g_prio[i]=(10-self->Running[i]->priority)*10;
+		}
+	}*/
 	return 0;
 }
 Progs * OS_next_p(OS *self)
 {
 	struct rb_node * n=rb_last(self->Running);
 	return rb_entry( n , Progs , __rb_node );
-
+	/*
+	int i=-1;
+	int k;
+	for(k=0;k<max_prog;++k)
+	{
+		if(self->used_r[k])
+		{
+			if(i==-1) i=k;
+			else if(self->g_prio[k]<self->g_prio[i])//get minimum
+				i=k;
+		}
+	}
+	if(i==-1)
+		return -1;
+	return i;*/
 }
 int OS_insert_p(OS *self,Progs *prog)
 {
 	rb_insert_prog( self->Not_started , prog->priority , &(prog->__rb_node),BY_PRIO );
-	return 0;
-
+/*
+	int i;
+	for(i=0; i< max_prog;++i)
+	{
+		if(!self->used_n[i])
+		{
+		self->Not_started[i]=prog;
+		self->used_n[i]=1;
+		return i;
+		}
+	}
+	return -1;*/
 }
 int OS_start_p(OS *self,Progs *prog)
 {
 	rb_erase_unode( &prog->__rb_node,self->Not_started );
 	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
-	return 0;
+	/*int i;
+	for(i=0; i< max_prog;++i)
+	{
+		if(!self->used_r[i])
+		{
+			self->Running[i]=self->Not_started[prog_num];
+			self->used_r[prog_num]=1;
+			self->Not_started[prog_num]=NULL;
+			self->used_n[prog_num]=0;
+			return i;
+		}
+	}
+	return -1;*/
 }
 int OS_sleep_p(OS *self,Progs *prog)
 {
 	rb_erase_unode( &prog->__rb_node,self->Running );
 	rb_insert_prog( self->Sleeping , prog->app_id , &(prog->__rb_node),BY_ID );
-	return 0;
+	//int i=kmalloc(sizeof(int),GFP_KERNEL);
+	/*
+	int i;
+	for(i=0; i< max_prog;++i)
+	{
+		if(!self->used_s[i])
+		{
+			self->Sleeping[i]=self->Running[prog_num];
+			self->used_s[i]=1;
+			self->Running[prog_num]=NULL;
+			self->used_r[prog_num]=0;
+			return i;
+		}
+	}
+	return -1;*/
 }
 Progs *OS_find_appid(OS *self,uint16_t app_id)
 {
 	return rb_search_prog( self->Sleeping , app_id ,BY_ID);
-
+	//int i=kmalloc(sizeof(int),GFP_KERNEL);
+	/*int i;
+	//printk("try to find app_id %d",app_id);
+	for(i=0; i< max_prog;++i)
+	{
+		if(self->used_s[i])
+		{
+			if (self->Sleeping[i]->app_id==app_id)
+				return i;
+		}
+	}
+	return -1;*/
 }
 /*int OS_find_prot(OS *self,int prot_id)
 {
@@ -982,7 +1217,22 @@ int OS_wakeup_p(OS *self,Progs *prog)
 {
 	rb_erase_unode( &prog->__rb_node,self->Sleeping );
 	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
-	return 0;
+
+	//int i=kmalloc(sizeof(int),GFP_KERNEL);
+	/*int i=0;
+	for(i=0; i< max_prog;++i)
+	{
+		if(!self->used_r[i])
+		{
+			self->Running[i]=self->Sleeping[prog_num];
+			self->used_r[i]=1;
+			self->Sleeping[prog_num]=NULL;
+			self->used_s[prog_num]=0;
+			self->g_prio[i]=10;
+			return i;
+		}
+	}
+	return -1;*/
 }
 int OS_run_p(OS *self)
 {
@@ -1000,24 +1250,28 @@ Progs *OS_givenext_p(OS *self)
 {
 	struct rb_node * n =rb_last(self->Not_started);
 	return rb_entry( n , Progs , __rb_node );
-
-}
-int OS_del_p(OS *self, Progs *prog)
+	/*int i=-1;
+	int k;
+	for(k=0;k<max_prog;++k)
 	{
-	//int i;
-	//Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
-	kfree(prog->code);prog->code=NULL;
-	kfree(prog->codevar);prog->codevar=NULL;
-	kfree(prog);prog=NULL;
-
+		if(self->used_n[k])
+		{
+			if(i==-1)
+				i=k;
+			else if(self->Not_started[k]->priority > self->Not_started[i]->priority)//get max
+				i=k;
+		}
+	}
+	if(i==-1) return -1;
+	return i;*/
+}
+int OS_term_p(OS *self, int prog_n)
+	{
 		return 0;
 	}
 
 
-int OS_shutdown(OS *self)
-{
-	return 0;
-}
+
 
 
 
@@ -1054,7 +1308,10 @@ int cqc_response(OS *self)
 	printk(KERN_INFO "res: %d, data: ver:%d,type:%d,app_id:%d, length: %d\n",res,cqcH_ret.version,cqcH_ret.type,cqcH_ret.app_id,cqcH_ret.length);
 	if(cqcH_ret.length>0)
 	{
+		//msleep(200);
+		//printk("second header");
 		res =tcp_client_receive(conn_socket, cqcN_ret.str,MSG_DONTWAIT,sizeof(cqcN_ret.str));
+		//printk(KERN_INFO "Notify res: %d, data: id:%d,outcome:%d,datetime:%d, remodteappid: %d \n",res,cqcN_ret.qubit_id,cqcN_ret.outcome,(int)(cqcN_ret.datetime),(int)(cqcN_ret.remote_app_id));
 	}
 	//printk(KERN_INFO "TRY TO FIND THE ID\n");
 	prog=OS_find_appid(self,cqcH_ret.app_id);
@@ -1176,7 +1433,7 @@ int str_rep( char *into,const char *from,int len)
 #define com_send_prot		101
 
 #define com_start_prot		10
-//define com_send_int		11
+#define com_send_int		11
 
 
 comHeader comH;
@@ -1184,7 +1441,7 @@ comHeader comH;
 int classical_recv(OS *self)
 {
 	//printk("staring classical recv\n");
-	int size,id;//,res;
+	int size,id,res;
 	Progs *prog;
 	//int bufsize = 100;
         //unsigned char buf[bufsize+1];
@@ -1192,7 +1449,15 @@ int classical_recv(OS *self)
 	//printk("smth was recv%d\n ",size);
 	if(size>0)
 		{
+		//id=get_id_of_ip(addr.sin_addr.s_addr);
 		id=comH.send_name;
+		/*if(id==-1)
+			{
+			id=get_empty_id();
+			printk("gotten new id%d. This should not happen I guess\n",id);
+			//regist[id]=connect_to_ip(addr.sin_addr.s_addr,comH.send_name);
+			}
+		printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);*/
 
 		printk("data: version %d,prog_id %d, cmd %d, identifier: %lld,ms: %lld\n",comH.version,comH.recv_id,comH.type,comH.identifier,comH.ms);
 		/*if( comH.send_name!=regist[id]->name_num)
@@ -1200,7 +1465,7 @@ int classical_recv(OS *self)
 			printk("name does not fit or is new. change %d to %d",regist[id]->name_num,comH.send_name);
 			regist[id]->name_num=comH.send_name;
 			}*/
-		if(comH.type==cmd_sendc)
+		if(comH.type==com_send_int)
 			{
 			prog=OS_find_appid(self,comH.identifier);
 			if(prog->code[prog->cur-1]->first!=comH.send_name)
@@ -1228,26 +1493,43 @@ int classical_recv(OS *self)
 	return -1;	
 }
 
+/*int add_person(struct socket *sock)
+{
+	
+	com.version=0;
+	com.my_name=PORT%10;
+	com.my_id=PORT;
+	com.other_name=0;
+	tcp_client_send(sock,com.str, sizeof(com.str), MSG_DONTWAIT);
+	return 0;
+}*/
+command my_c0;
+command my_c1;
+command my_c2;
+command my_c3;
 Progs p;
 
-
+int prog_id;
+//char cqc_back_cmd[100];
 cqcHeader cqc_back_cmd;
 #define waiting 0
+char test_str[200];
+char test_strr[500];
+int test_i,test_res;
 comHeader com_test;
 int looping(void)
 {	
-	int lauf,run;
-	Progs *prog;
 	printk("start cycling\n");
 	OS_init(&my_os);
 	//struct socket *test_con;
-	//u8 ip[]={192,168,1,MY_ID +1,'\0'};
-	
-	
+	u8 ip[]={192,168,1,MY_ID +1,'\0'};
+	int lauf;
+	Progs *prog;
 	//int id;
-	
+	int run;
 	run=socket_open();
 	printk("sock_con res:%d\n",run);
+	regist=kmalloc(sizeof(struct con_infos *)*max_con, GFP_KERNEL);
 	/*for(run=0; run<max_con;++run)
 		regist[run]=NULL;
 	regist[0]=connect_to_ip(htonl(create_address(ip)),ip[3]);
@@ -1285,7 +1567,39 @@ int looping(void)
 	}
 	return 1;
 }
+/*void prog(void)
+{
+	int i,id,size;
+	int bufsize = 100;
+        unsigned char buf[bufsize+1];
+	allow_signal(SIGKILL);
+        current->flags |= PF_NOFREEZE;
+	regist=kmalloc(sizeof(struct con_infos *)*max_con, GFP_KERNEL);
+	for(i=0;i<max_con;++i)
+		regist[i]=NULL;
+	socket_open();
+	
+	for(i=0;i<1000;++i)
+	{
+		memset(&buf, 0, bufsize+1);
+                size = ksocket_receive(sock, &addr, buf, bufsize);
 
+		if(size>0)
+		{
+			id=get_id_of_ip(addr.sin_addr.s_addr);
+			if(id==-1)
+				{
+				id=get_empty_id();
+				printk("gotten new id%d\n",id);
+				regist[id]=connect_to_ip(addr.sin_addr.s_addr);
+				}
+			printk("Inaddr: current s_addr:%d,id:%d", addr.sin_addr.s_addr,id);
+			//printk(KERN_INFO MODULE_NAME": received %d bytes\n", size);
+		        printk("data: %s\n", buf);
+		}
+	}
+	printk("Prog over\n");
+}*/
 
 struct task_struct *main_thread;
 #define max_reads 100
@@ -1330,6 +1644,9 @@ static int __init ebbchar_init(void)
    tcp_client_connect();
    
    
+   net_people=kmalloc(MAX_CONNS*sizeof(people *),GFP_KERNEL);
+   for(i=0; i<MAX_CONNS;++i)
+	net_people[i]=NULL;
    printk("connection established");
 
    main_thread=kthread_run((void *)looping, NULL,DEVICE_NAME);
@@ -1347,14 +1664,43 @@ int len;
 char *response;
 char *reply;
 static void __exit ebbchar_exit(void){
-	DECLARE_WAIT_QUEUE_HEAD(exit_wait);
-	device_destroy(ebbcharClass, MKDEV(majorNumber, 0));     // remove the device
-	class_unregister(ebbcharClass);                          // unregister the device class
-	class_destroy(ebbcharClass);                             // remove the device class
-	unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
-	printk(KERN_INFO "EBBChar: Goodbye from the LKM!\n");
-	   //NETWORK END
+   DECLARE_WAIT_QUEUE_HEAD(exit_wait);
+   device_destroy(ebbcharClass, MKDEV(majorNumber, 0));     // remove the device
+   class_unregister(ebbcharClass);                          // unregister the device class
+   class_destroy(ebbcharClass);                             // remove the device class
+   unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
+   printk(KERN_INFO "EBBChar: Goodbye from the LKM!\n");
+   //NETWORK END
+	/* This is now commented to prevent crash..
+	len=49;
+	response=kmalloc( (len+1)*sizeof(char),GFP_KERNEL);
+	reply=kmalloc( (len+1)*sizeof(char),GFP_KERNEL);
+	
+        //DECLARE_WAITQUEUE(exit_wait, current);
+        
 
+        memset(&reply, 0, len+1);
+        strcat(reply, "ADIOS"); 
+        //tcp_client_send(conn_socket, reply);
+        tcp_client_send(conn_socket, reply, strlen(reply), MSG_DONTWAIT);
+        //while(1)
+        //{
+                
+                tcp_client_receive(conn_socket, response);
+                add_wait_queue(&conn_socket->sk->sk_wq->wait, &exit_wait)
+                
+         wait_event_timeout(exit_wait,\
+                         !skb_queue_empty(&conn_socket->sk->sk_receive_queue),\
+                                                                        5*HZ);
+        if(!skb_queue_empty(&conn_socket->sk->sk_receive_queue))
+        {
+                memset(&response, 0, len+1);
+                tcp_client_receive(conn_socket, response, MSG_DONTWAIT);
+                //remove_wait_queue(&conn_socket->sk->sk_wq->wait, &exit_wait);
+        }
+
+        //}
+	*/
         if(conn_socket != NULL)
         {
                 sock_release(conn_socket);
@@ -1413,6 +1759,7 @@ int get_place(struct file *node)
 }
 static int dev_open1(struct inode *inodep, struct file *filep){
    numberOpens++;
+   printk("new node_nr:%d\n",get_place(filep));
    printk(KERN_INFO "EBBChar: Device has been opened %d time(s)\n", numberOpens);
    return 0;
 }
@@ -1463,13 +1810,13 @@ char str[200*4+4];
 static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int prog_id,command;
-	Progs *new_prog;
+	Progs *prog;
 	union Get_prog *prog_shell;
 	prog_id=cmd/10;
 	command=cmd%10;
          switch(command) {
                 case load_prog:;
-			//Progs *new_prog;
+			Progs *new_prog;
 			prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
 			copy_from_user(prog_shell->str,(char*) arg, sizeof(union Get_prog));
 			
@@ -1517,18 +1864,90 @@ static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
 
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
 
-   return 0;
+   union return_msg ret_ms;
+   int i;
+   int error_count = 0;
+   int pos=find_node(filep);
+   
+   printk("Node number:%d, process:%d/%d \n",pos,prog_ids[pos]->cur,prog_ids[pos]->size);
+   if(prog_ids[pos]->status==2)
+	{
+   	ret_ms.type=1;
+	for (i=0;i<prog_ids[pos]->output_size;++i)
+		ret_ms.results[i]=prog_ids[pos]->codevar[i];
+	}
+   else
+	{
+	ret_ms.type=0;
+	ret_ms.results[0]=prog_ids[pos]->cur;
+	ret_ms.results[1]=prog_ids[pos]->size;
+	}
+   // copy_to_user has the format ( * to, *from, size) and returns 0 on success
+   
+   
+   //tcp_client_receive(conn_socket, message,MSG_DONTWAIT);
+   error_count = copy_to_user(buffer, ret_ms.str, sizeof(ret_ms.str));
+
+   if (error_count==0){            // if true then have success
+      printk(KERN_INFO "EBBChar: Sent %ld characters to the user\n", sizeof(ret_ms.str));
+      return (size_of_message=0);  // clear the position to the start and return 0
+   }
+   else {
+      printk(KERN_INFO "EBBChar: Failed to send %d characters to the user\n", error_count);
+      return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
+   }
 }
+
+/** @brief This function is called whenever the device is being written to from user space i.e.
+ *  data is sent to the device from the user. The data is copied to the message[] array in this
+ *  LKM using the sprintf() function along with the length of the string.
+ *  @param filep A pointer to a file object
+ *  @param buffer The buffer to that contains the string to write to the device
+ *  @param len The length of the array of data that is being passed in the const char buffer
+ *  @param offset The offset if required
+ */
+
 
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
   
-   return 0;
+   union Get_prog *prog_shell=kmalloc(sizeof(union Get_prog),GFP_KERNEL);
+   Progs *new_prog;
+   int pos=find_node(filep);
+   printk("Node number:%d\n",pos);
+   
+   str_rep(prog_shell->str,buffer,len); 
+   if(prog_shell->np!=MY_ID)
+	{
+	send_prog(prog_shell->np,prog_shell);
+	return 0;
+	}
+   printk("shell prio:%d\n",prog_shell->prio);
+   new_prog=create_prog(prog_shell,prog_shell->prot_id);
+   new_prog->direct_input=1;
+   prog_ids[pos]=new_prog;
+   kfree(prog_shell);
+   printk("new prog,%p \n",new_prog);
+   printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
+   OS_insert_p(&my_os,new_prog);
+   //sprintf(message, "%s(%zu letters)", buffer, len);   // appending received string with its length
+   //size_of_message = strlen(message);                 // store the length of the stored message
+   printk(KERN_INFO "EBBClient : sent %zu characters to server\n", len);
+   return len;
 }
 
+/** @brief The device release function that is called whenever the device is closed/released by
+ *  the userspace program
+ *  @param inodep A pointer to an inode object (defined in linux/fs.h)
+ *  @param filep A pointer to a file object (defined in linux/fs.h)
+ */
 static int dev_release(struct inode *inodep, struct file *filep){
    printk(KERN_INFO "EBBChar: Device successfully closed\n");
    return 0;
 }
 
+/** @brief A module must use the module_init() module_exit() macros from linux/init.h, which
+ *  identify the initialization function at insertion time and the cleanup function (as
+ *  listed above)
+ */
 module_init(ebbchar_init);
 module_exit(ebbchar_exit);

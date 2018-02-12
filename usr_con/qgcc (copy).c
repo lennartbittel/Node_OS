@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include<errno.h>
-#include<fcntl.h>
-#include<time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <time.h>
 #include <math.h>
-#include<sys/ioctl.h>
-
-
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <stdexcept>
 
 
 
@@ -35,8 +35,11 @@
 #define cmd_cnot		20	/* CNOT Gate with this as control */
 #define cmd_cphase		21	/* CPHASE Gate with this as control */
 
-#define cmd_if			100
+#define cmd_if			100	
 #define cmd_goto		101
+#define cmd_add			102
+#define cmd_multi		103
+#define cmd_setval		104
 
 #define cmd_sendc		201 	//person_name, var
 #define cmd_recvc		202	//person_name, var 
@@ -87,7 +90,8 @@ int *get_num(int m,int k,int num)
 	int *nums;
 	if(k==0)
 		{
-		nums=malloc(10*sizeof(int));
+		//nums=malloc(10*sizeof(int));
+		nums=(int*) malloc(10);
 		return nums;
 		}
 	for(int i=m;i>=k;--i)
@@ -149,7 +153,7 @@ typedef struct {
 	int **c_res;
 	unsigned long val;
 } qsys;
-int find_item(void **lis,void *item,int len)
+int find_item(int **lis,int *item,int len)
 {
 	for(int k=0; k<len;++k)
 		if(lis[k]==item)
@@ -159,7 +163,8 @@ int find_item(void **lis,void *item,int len)
 
 int init_sys(qsys *self,int np,int prot_id)
 {
-	self->c_res=malloc(sizeof(int *)*100);
+	//self->c_res=malloc(sizeof(int *)*100);
+	self->c_res=(int **) malloc(100);
 	//self->q_var=malloc(sizeof(int *)*10);
 	//self->peop=malloc(sizeof(person *)*10);
 	self->prot_id=prot_id;
@@ -170,6 +175,14 @@ int init_sys(qsys *self,int np,int prot_id)
 	self->max_q=0;
 	//self->operations=malloc(sizeof(ops)*60);
 	return 0;
+}
+int add_inst(qsys *self,int task,int first,int second,int third)
+{
+	self->operations[self->cur].task=task;
+	self->operations[self->cur].first=first;
+	self->operations[self->cur].second=second;
+	self->operations[self->cur].third=third;
+	return self->operations[(self->cur)++].first;
 }
 int create_q(qsys *self)
 {
@@ -342,6 +355,7 @@ int load_prog(qsys *self,int prio)
       		perror("Failed to write the message to the device.");
       		return errno;
 		}
+	return 0;
 }
 int get_status(qsys *self,int app_id)
 {	
@@ -354,10 +368,11 @@ int get_status(qsys *self,int app_id)
 			printf("ms was not rec");
 			return -1;
 			}
-		printf("ms:%d\n",ms.type);
 		if(ms.type==0)
+			{
 			printf("still running: %d/%d \n",ms.results[0],ms.results[1]);
 			return 1;
+			}
 		if (ms.type==1)
 			{
 			printf("program was executed. \n");
@@ -441,6 +456,7 @@ int shor(int number,int n)
 }*/
 int qkd()
 {
+	
 	int alice=1;
 	int bob=0;
 	srand(time(NULL));
@@ -477,12 +493,13 @@ int qkd()
 		printf("%d, ",resa[i]);
 	return 0;
 }
-int main()
+int lottery(int app_id)
 {
+	
 	qsys sysA;
-	srand(time(NULL));
+	//srand(time(NULL));
 	int i,alice=0;
-	init_sys(&sysA,alice,rand()%1000);
+	init_sys(&sysA,alice,app_id);
 	int res[27];
 	
 	int num=0;
@@ -495,7 +512,7 @@ int main()
 	}
 
 	int result;
-	//result=perform_sys(&sysA,10,1);
+	//printf("%d",sysA.prot_id);
 	result=load_prog(&sysA,10);
 	while(get_status(&sysA,sysA.prot_id))
 	{
@@ -515,7 +532,93 @@ int main()
 	for(int k=0; k<6;++k)
 		printf("%d, ",nums[k]);
 	printf("special: %d\n",num%9+1);
+	return 0;
+}
+int test_lot()
+{
+	srand(time(NULL));
+	struct timeval time;
+	gettimeofday( &time, 0 );
+	long start_t = 1000000 * time.tv_sec + time.tv_usec;
+	for(int i=0; i<5;++i)
+		lottery(rand()%100);
+	gettimeofday( &time, 0 );
+  	long end_t = 1000000 * time.tv_sec + time.tv_usec;
+	printf("time: %ld\n",end_t-start_t);
+}
+//*********************************************************QUBITS*****************************************
+typedef struct {
+qsys *sys;
+int id;
+int type;
+int additional;
+
+} qubit;
+
+
+int con_qs(qsys *sys,qubit *q);
+
+
+
+//********************************************************variables***************************************
+class intc{
+	qsys *sys;
+	int original;
+	int id;
+	int regist;
+	int val;
+	public:
+	intc(qsys* s,int o=0)
+	{
 	
+	}
+	intc operator+(const intc&) const;
+};
+intc operator+(intc lhs,const intc& rhs)
+	{
+	if(lhs.sys!=rhs.sys) 
+		throw std::invalid_argument("variables from different systems\n");
+	intc res=reg_c(lhs.sys,0); 
+	add_inst(res.sys,cmd_add,res.id,lhs.id,0);
+	return res;
+	}
+intc& operator=(const intc& other)
+	{
+	if (this != &other)
+		{
+		if(this.sys!=this.sys) 
+			throw std::invalid_argument("variables from different systems\n");
+		this->id=other->id;		
+		add_inst(res.sys,cmd_add,res.id,lhs.id,0);
+		}
+	return res;
+	}
+
+int main()
+{
+	qsys *sysA;
+
+	intc val=reg_c(sysA,0);
+//	reg_c val={0,sysA};
+
+	/*srand(time(NULL));
+	int i,alice=0;
+	printf("%d\n", [);
+	init_sys(&sysA,alice,app_id);
+	qubit A; 
+	A.create(sys);
+	hgate(A);
+	intc res =meas(A);
+	
+	forc(intc res=0,10,1)
+	{
+		ifc(res)
+		{
+			A.create(sys);
+		}
+	}
+	endf();*/
+
 	//sleep(2);
  /*	if(1)
 {
