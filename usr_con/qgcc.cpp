@@ -165,7 +165,7 @@ typedef struct {
 			//person peop[10];
 			ops operations[400];
 		}__attribute__((__packed__));
-		char str[100+4*4+8*10+400*16];
+		char str[100+4*4+400*16];
 		};
 	int **c_res;
 	unsigned long val;
@@ -356,7 +356,7 @@ int perform_sys(qsys *self,int prio,int get_return)
 		ret = read(fd, ms.str, sizeof(ms.str));  
 		if(ret<0)
 			{
-			printf("ms was not rec");
+			printf("ms was not rec\n");
 			return -1;
 			}
 		if(ms.type==0)
@@ -377,12 +377,6 @@ int load_prog(qsys *self,int prio)
 {
 	if(self->val)
 		printf("ERR: there are qubits which are still in use\n");
-	printf("amount of steps:%d,amount of final vals:%d,max_qubits:%d\n",self->cur,self->icr,self->max_q);
-	for(int i=0;i< self->cur; ++i)
-		{
-		printf("task %d: %d,first:%d,second: %d\n",i,self->operations[i].task,self->operations[i].first,self->operations[i].second);
-	
-		}
 	self->prio=prio;
 	self->operations[(self->cur)++].task=cmd_done;
 	
@@ -395,7 +389,7 @@ int load_prog(qsys *self,int prio)
 		}
 	return 0;
 }
-int get_status(qsys *self,int app_id)
+int get_status(int app_id,qsys *self=NULL)
 {	
 		union return_msg ms;
 		int fd,ret;
@@ -403,19 +397,24 @@ int get_status(qsys *self,int app_id)
 		ret = ioctl(fd, app_id*10+2, (int32_t*) &ms.str);  
 		if(ret<0)
 			{
-			printf("ms was not rec");
+			printf("%d:ms was not rec",app_id);
 			return -1;
 			}
 		if(ms.type==0)
 			{
-			printf("still running: %d/%d \n",ms.results[0],ms.results[1]);
+			printf("%d:still running: %d/%d \n",app_id,ms.results[0],ms.results[1]);
 			return 1;
 			}
 		if (ms.type==1)
 			{
-			printf("program was executed. \n");
+			printf("%d:program was executed. \n",app_id);
 			for(int i=0;i< self->icr; ++i)
-				*(self->c_res[i])=ms.results[i];
+			{
+				printf(" %d ",ms.results[i]);
+				if (self!=NULL)
+					*(self->c_res[i])=ms.results[i];
+			}		
+			printf("\n");	
 			return 0;
 			}
 }
@@ -770,10 +769,10 @@ int qft(qsys *self,intc *q,int n)
 		}
 
 }
-int main()
+int teleportation()
 {
-	int alice=1;
-	int bob=2;
+	int alice=0;
+	int bob=1;
 	qsys sysA;init_sys(&sysA,alice,0);
 	change_sys(&sysA);
 	intc res;
@@ -844,4 +843,77 @@ int main()
 	perform_sys(&sysB,0,0);
 	
 	return 0;
+}
+int sum_to_100()
+{
+	srand(time(NULL));
+	int prot_id=rand()%10000;
+	int alice=0;
+	int bob=1;
+	qsys sysA;init_sys(&sysA,alice,prot_id);
+	change_sys(&sysA);
+	intc val;
+	val=0;
+	intc i;
+	forq(&(i=0),100,1);
+		val+=i;
+	endq();
+	
+	show_code(&sysA);
+	load_prog(&sysA,100);
+	for( int i=0; i<10;++i)
+		get_status(prot_id,&sysA);
+	//perform_sys(&sysA,0,1);
+	//get_status
+}
+int parity_check()
+{
+	//sum_to_100();
+	
+	int prot_id=rand()%10000;
+	int alice=0;
+	int bob=1;
+	qsys sysA;init_sys(&sysA,alice,prot_id);
+	change_sys(&sysA);
+	intc val;
+	val=0;
+	intc i;
+	forq(&(i=0),10,1);
+		intq q0;
+		q0*=cmd_hgate;
+		val+=q0;
+	endq();
+	
+	show_code(&sysA);
+	load_prog(&sysA,100);
+	return prot_id;
+
+	//perform_sys(&sysA,0,1);
+	//get_status
+}
+int start_progs(int *ids)
+{
+	for(int i=0; i<5;++i)
+		ids[i]=parity_check();
+	return 0;
+}
+int main()
+{	
+	srand(time(NULL));
+	int ids[100];
+	for(int i=0;i<100;++i)
+		ids[i]=0;
+	start_progs(ids);
+	for(int j=0;j<10;++j)
+	{
+		printf("round: %d\n",j+1);
+		for( int i=0; i<10;++i)
+		{
+			usleep(500);
+			if(ids[i]!=0)
+				get_status(ids[i]);
+		}
+		usleep(1000000);
+	}
+
 }

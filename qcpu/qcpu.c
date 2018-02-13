@@ -540,6 +540,7 @@ typedef struct {
 }command;
 typedef struct {
 	struct rb_node __rb_node;
+	struct rb_node __rb_node_full;
 	char name[100];
 	
 	uint16_t app_id;
@@ -547,7 +548,7 @@ typedef struct {
 	int prot_id;
 	int state;
 	int priority;
-	command **code;
+	command *code;
 	int *codevar;
 	int output_size;
 	int qubits[10];
@@ -603,13 +604,21 @@ typedef struct
 Progs * rb_search_prog( struct rb_root * root , int target ,int type ){
 	
        struct rb_node * n = root->rb_node;
-       Progs * ans;
-       int lauf;
+       Progs * ans=NULL;
+       int lauf=0;
        while( n ){
               //Get the parent struct to obtain the data for comparison
-              	ans = rb_entry( n , Progs, __rb_node );
-	      	if(type==BY_PRIO) 	lauf=ans->priority;
-		if(type==BY_ID)		lauf=ans->app_id;
+	      	if(type==BY_PRIO) 	
+		{
+			ans = rb_entry( n , Progs, __rb_node );
+			lauf=ans->priority;
+		}
+		if(type==BY_ID)	
+		{
+			
+			ans = rb_entry( n , Progs, __rb_node_full );
+			lauf=ans->app_id;
+		}
 		if( target < lauf )
 		 	n = n->rb_left;
 		else if( target > lauf )
@@ -625,15 +634,22 @@ Progs * rb_search_prog( struct rb_root * root , int target ,int type ){
 Progs * rb_insert_prog( struct rb_root * root , int target , struct rb_node * source,int type ){
        struct rb_node **p = &root->rb_node;
        struct rb_node *parent = NULL;
-       Progs * ans;
-	int lauf=0;
+       Progs * ans=NULL;
+       int lauf=0;
        while( *p ){
 
               parent = *p;
-              ans = rb_entry( parent , Progs, __rb_node );
-	      if(type==BY_PRIO) 	lauf=ans->priority;
-	      else if(type==BY_ID)		lauf=ans->app_id;
-	      else lauf=0;	
+	      	if(type==BY_PRIO) 	
+		{
+			ans = rb_entry( parent , Progs, __rb_node );
+			lauf=ans->priority;
+		}
+		if(type==BY_ID)	
+		{
+			
+			ans = rb_entry(parent , Progs, __rb_node_full );
+			lauf=ans->app_id;
+		}
               if( target < lauf )
                      p = &(*p)->rb_left;
               else if( (target > lauf)||type==BY_PRIO ) //ID cares about none being equal.
@@ -647,11 +663,13 @@ Progs * rb_insert_prog( struct rb_root * root , int target , struct rb_node * so
        return NULL;
 
 }
-void rb_erase_unode( struct rb_node * source , struct rb_root * root ){
+void rb_erase_unode( struct rb_node * source , struct rb_root * root ,int type){
 
-       Progs * target;
+       Progs * target=NULL;
       
-       target = rb_entry( source , Progs , __rb_node );
+
+       if(type==BY_PRIO) target = rb_entry( source , Progs , __rb_node );
+       if(type==BY_ID) target = rb_entry( source , Progs , __rb_node_full );
        rb_erase( source , root );                           //Erase the node
        //kfree( target );                                     //Free the memory
 
@@ -669,6 +687,7 @@ int sizeof_tree(struct rb_root *root)
 		}
 	return i;
 }
+
 
 
 // end  rb tree-----------------------------------------------------------------------------
@@ -710,21 +729,23 @@ int perform_cmd(OS *self)
 {	
 	int lauf=0;
 	Progs *prog=OS_next_p(self);
-	int *c=prog->codevar;
+	int *c;
 	if(prog==NULL)
 		{
 		return -1;
 		}
+	c=prog->codevar;
 start:
 	if(unlikely(lauf>100)) return 1;
 
-	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d/%d with commands: %d,%d,%d",prog->name,prog->app_id,prog->cur,prog->size,prog->code[prog->cur]->task,prog->code[prog->cur]->first,prog->code[prog->cur]->second);
-	if (unlikely(prog->cur >= prog->size))
+	printk(KERN_INFO "Performing Task by %s,app_id:%d,line:%d/%d with commands: %d,%d,%d,%d",prog->name,prog->app_id,prog->cur,prog->size,prog->code[prog->cur].task,prog->code[prog->cur].first,prog->code[prog->cur].second,prog->code[prog->cur].third);
+	if (unlikely(prog->cur >= prog->size||prog->cur <0))
 		{
-		printk("in unwanted areas\n");
+		printk("in unwanted areas,%d/%d\n",prog->cur,prog->size);
+		msleep(500);
 		return -3;
 		}
-	cur=*(prog->code[prog->cur]);
+	cur=prog->code[prog->cur];
 	switch(cur.task)
 	{
 	case(cmd_if): //if statement
@@ -757,6 +778,8 @@ start:
 			c[cur.first]+=cur.second;
 		if(cur.third==2)
 			c[cur.first]=cur.second;
+		++(prog->cur);
+		goto start;
 	case(cmd_done):
 		printk("program is done\n");
 		prog->status=2;
@@ -947,13 +970,13 @@ int OS_insert_p(OS *self,Progs *prog)
 }
 int OS_start_p(OS *self,Progs *prog)
 {
-	rb_erase_unode( &prog->__rb_node,self->Not_started );
+	rb_erase_unode( &prog->__rb_node,self->Not_started ,BY_PRIO);
 	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
 	return 0;
 }
 int OS_sleep_p(OS *self,Progs *prog)
 {
-	rb_erase_unode( &prog->__rb_node,self->Running );
+	rb_erase_unode( &prog->__rb_node,self->Running,BY_PRIO );
 	rb_insert_prog( self->Sleeping , prog->app_id , &(prog->__rb_node),BY_ID );
 	return 0;
 }
@@ -980,7 +1003,7 @@ Progs *OS_find_appid(OS *self,uint16_t app_id)
 }*/
 int OS_wakeup_p(OS *self,Progs *prog)
 {
-	rb_erase_unode( &prog->__rb_node,self->Sleeping );
+	rb_erase_unode( &prog->__rb_node,self->Sleeping,BY_PRIO );
 	rb_insert_prog( self->Running , prog->priority , &(prog->__rb_node),BY_PRIO );
 	return 0;
 }
@@ -1085,7 +1108,7 @@ int cqc_response(OS *self)
 		}
 	else if (cqcH_ret.type==CQC_TP_MEASOUT)
 		{
-			prog->codevar[prog->code[prog->cur -1]->second]=cqcN_ret.outcome;
+			prog->codevar[prog->code[prog->cur -1].second]=cqcN_ret.outcome;
 			if(!noti_f)
 				OS_wakeup_p(self,prog);
 			
@@ -1121,7 +1144,8 @@ int name;
 
 
 
-union Get_prog{
+union Get_prog
+{
 	struct{
 		char name[100];
 		int np;
@@ -1130,17 +1154,17 @@ union Get_prog{
 		int res_size;
 		int max_q;
 		int prot_id;
-		person peop[10];
+		//person peop[10];
 		command cmds[400];
 		}__attribute__((__packed__));
-	char str[100+4+4+400*16+4];
-	};
+	char str[100+6*4+400*16];
+};
 Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
 {
 	int i;
 	Progs *new_prog=kmalloc(sizeof(Progs),GFP_KERNEL);
 	//new_prog->__rb_node=kmalloc(sizeof(struct rb_node),GFP_KERNEL);
-	new_prog->code=kmalloc(sizeof(command *)  *  prog_input->size,GFP_KERNEL);
+	new_prog->code=kmalloc(sizeof(command )  *  prog_input->size,GFP_KERNEL);
 	new_prog->output_size=prog_input->res_size;
 	new_prog->codevar=kmalloc(sizeof(int)*new_prog->output_size,GFP_KERNEL);
 	for(i=0;i< new_prog->output_size;++i)
@@ -1152,7 +1176,14 @@ Progs *create_prog(union Get_prog *prog_input,uint16_t app_id)
 	new_prog->app_id=app_id;
 	new_prog->status=1;
 	for(i=0;i<prog_input->size;++i)
-		new_prog->code[i]=&(prog_input->cmds[i]);
+		{
+		//new_prog->code[i]=&(prog_input->cmds[i]);
+		new_prog->code[i].task=prog_input->cmds[i].task;
+		new_prog->code[i].first=prog_input->cmds[i].first;
+		new_prog->code[i].second=prog_input->cmds[i].second;
+		new_prog->code[i].third=prog_input->cmds[i].third;
+		printk("%d,%d,%d,%d\n",new_prog->code[i].task,new_prog->code[i].first,new_prog->code[i].second,new_prog->code[i].third);
+		}
 	return new_prog;
 }
 int str_rep( char *into,const char *from,int len)
@@ -1203,9 +1234,9 @@ int classical_recv(OS *self)
 		if(comH.type==cmd_sendc)
 			{
 			prog=OS_find_appid(self,comH.identifier);
-			if(prog->code[prog->cur-1]->first!=comH.send_name)
-				printk("The id of the programs do not match. Try to continue however: %d,%d\n",prog->code[prog->cur-1]->first ,comH.send_name);
-			prog->codevar[prog->code[prog->cur -1]->second]=comH.ms;
+			if(prog->code[prog->cur-1].first!=comH.send_name)
+				printk("The id of the programs do not match. Try to continue however: %d,%d\n",prog->code[prog->cur-1].first ,comH.send_name);
+			prog->codevar[prog->code[prog->cur -1].second]=comH.ms;
 			OS_wakeup_p(self,prog);
 			}
 		if(comH.type==com_send_prot)
@@ -1236,8 +1267,14 @@ cqcHeader cqc_back_cmd;
 comHeader com_test;
 int looping(void)
 {	
-	int lauf,run;
+	int lauf=1,run;
 	Progs *prog;
+	printk(KERN_INFO "CL:establish TCP connection\n");
+   	tcp_client_connect();
+   	printk("connection established");
+
+	
+	
 	printk("start cycling\n");
 	OS_init(&my_os);
 	//struct socket *test_con;
@@ -1253,7 +1290,8 @@ int looping(void)
 	regist[0]=connect_to_ip(htonl(create_address(ip)),ip[3]);
 	*/
 	run=0;
-	for(lauf=0;lauf<20*20*50+(1-waiting)*1000000000;++lauf)
+	//for(lauf=0;lauf<20*20*50+(1-waiting)*1000000000;++lauf)
+	while(++lauf)
 	{
 		if(kthread_should_stop()) 
 			{
@@ -1326,11 +1364,6 @@ static int __init ebbchar_init(void)
    }
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
 	//network stuff
-   printk(KERN_INFO "CL:establish TCP connection\n");
-   tcp_client_connect();
-   
-   
-   printk("connection established");
 
    main_thread=kthread_run((void *)looping, NULL,DEVICE_NAME);
    
@@ -1467,6 +1500,7 @@ static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
 	union Get_prog *prog_shell;
 	prog_id=cmd/10;
 	command=cmd%10;
+	printk("prog_id:%d, cmd:%d\n",prog_id,command);
          switch(command) {
                 case load_prog:;
 			//Progs *new_prog;
@@ -1482,7 +1516,7 @@ static long dev_ioctl1(struct file *file, unsigned int cmd, unsigned long arg)
 			printk("shell prio:%d\n",prog_shell->prio);
 			new_prog=create_prog(prog_shell,prog_shell->prot_id);
 			new_prog->direct_input=1;
-			rb_insert_prog( my_os.All_progs , new_prog->app_id , &new_prog->__rb_node,BY_ID );
+			rb_insert_prog( my_os.All_progs , new_prog->app_id , &new_prog->__rb_node_full,BY_ID );
 			kfree(prog_shell);
 			printk("new prog,%p \n",new_prog);
 			printk("New prog created, prio: %d,size:%d,app_id%d\n",new_prog->priority,new_prog->size,new_prog->app_id);
